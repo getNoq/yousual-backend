@@ -4,6 +4,15 @@ from rest_framework import serializers
 from .models import Invoice, InvoiceShare
 from .utils import extract_invoice_seq
 
+ALLOWED_BRAND_COLORS = {"#2E8F63", "#3B82F6", "#141414", "#7C3AED", "#F97316"}
+
+def validate_brand_color(value: str) -> str:
+    if not value:
+        return ""
+    if value not in ALLOWED_BRAND_COLORS:
+        raise serializers.ValidationError("Invalid brand color.")
+    return value
+
 
 class InvoiceSerializer(serializers.ModelSerializer):
     created_at = serializers.CharField(source="created_at_display")
@@ -13,7 +22,7 @@ class InvoiceSerializer(serializers.ModelSerializer):
         model = Invoice
         fields = [
             "id", "invoice_number", "business_name", "customer_name",
-            "customer_phone", "items", "total", "status", "created_at", "paid_date",
+            "customer_phone", "items", "total", "status", "note", "brand_color", "created_at", "paid_date",
         ]
 
 
@@ -28,6 +37,11 @@ class CreateInvoiceSerializer(serializers.Serializer):
     customer_phone = serializers.CharField(required=False, allow_blank=True, default="")
     items = serializers.ListField(child=serializers.DictField())
     status = serializers.ChoiceField(choices=Invoice.Status.choices, default=Invoice.Status.DUE)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=280, default="")
+    brand_color = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_brand_color(self, value):
+        return validate_brand_color(value)
 
     def validate_customer_name(self, value):
         value = value.strip()

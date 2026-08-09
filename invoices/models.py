@@ -17,6 +17,8 @@ class Invoice(models.Model):
     items = models.JSONField(default=list)
     total = models.DecimalField(max_digits=12, decimal_places=2)
     status = models.CharField(max_length=4, choices=Status.choices, default=Status.DUE)
+    note = models.CharField(max_length=280, blank=True, default="")
+    brand_color = models.CharField(max_length=7, blank=True, default="")  # hex, e.g. "#2E8F63"
     created_at_display = models.CharField(max_length=32)
     paid_date_display = models.CharField(max_length=32, blank=True, null=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
@@ -51,6 +53,8 @@ class InvoiceShare(models.Model):
     items = models.JSONField(default=list)
     total = models.DecimalField(max_digits=12, decimal_places=2)
     status = models.CharField(max_length=4, choices=Invoice.Status.choices)
+    note = models.CharField(max_length=280, blank=True, default="")
+    brand_color = models.CharField(max_length=7, blank=True, default="")  # hex, e.g. "#2E8F63"
     created_at_display = models.CharField(max_length=32)
     paid_date_display = models.CharField(max_length=32, blank=True, null=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
