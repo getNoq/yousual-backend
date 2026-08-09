@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "accounts",
     "invoices",
+    "django.contrib.humanize",
 ]
 
 MIDDLEWARE = [

@@ -1,5 +1,8 @@
+from accounts.phone import normalize_ng_phone
 from rest_framework import serializers
-from .models import Invoice
+
+from .models import Invoice, InvoiceShare
+from .utils import extract_invoice_seq
 
 
 class InvoiceSerializer(serializers.ModelSerializer):
@@ -14,18 +17,85 @@ class InvoiceSerializer(serializers.ModelSerializer):
         ]
 
 
+class CreateInvoiceSerializer(serializers.Serializer):
+    """
+    Used by the dashboard's "New invoice" form. business_name isn't
+    accepted here at all — it's always the signed-in user's own
+    account name, set server-side in create().
+    """
+
+    customer_name = serializers.CharField(max_length=255)
+    customer_phone = serializers.CharField(required=False, allow_blank=True, default="")
+    items = serializers.ListField(child=serializers.DictField())
+    status = serializers.ChoiceField(choices=Invoice.Status.choices, default=Invoice.Status.DUE)
+
+    def validate_customer_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Customer name is required.")
+        return value
+
+    def validate_customer_phone(self, value):
+        if not value:
+            return ""
+        return normalize_ng_phone(value)
+
+    def validate_items(self, value):
+        cleaned = []
+        for item in value:
+            description = (item.get("description") or "").strip()
+            if not description:
+                continue
+            try:
+                qty = float(item.get("qty"))
+                unit_price = float(item.get("unit_price"))
+            except (TypeError, ValueError):
+                raise serializers.ValidationError("Each item needs a valid quantity and price.")
+            if qty <= 0 or unit_price <= 0:
+                raise serializers.ValidationError("Quantity and price must be greater than zero.")
+            cleaned.append({"description": description, "qty": qty, "unit_price": unit_price})
+        if not cleaned:
+            raise serializers.ValidationError("Add at least one item with a description, quantity, and price.")
+        return cleaned
+
+    def create(self, validated_data):
+        from django.db import IntegrityError
+        from django.utils import timezone
+
+        user = self.context["request"].user
+        items = validated_data["items"]
+        total = sum(i["qty"] * i["unit_price"] for i in items)
+        status = validated_data["status"]
+        now_display = timezone.now().strftime("%d %b %Y")
+
+        for _ in range(3):
+            invoice_number = user.next_invoice_number()
+            try:
+                return Invoice.objects.create(
+                    user=user,
+                    invoice_number=invoice_number,
+                    business_name=user.business_name,
+                    customer_name=validated_data["customer_name"],
+                    customer_phone=validated_data.get("customer_phone", ""),
+                    items=items,
+                    total=total,
+                    status=status,
+                    created_at_display=now_display,
+                    paid_date_display=now_display if status == Invoice.Status.PAID else None,
+                )
+            except IntegrityError:
+                continue
+        raise serializers.ValidationError({"non_field_errors": ["Couldn't generate an invoice number. Try again."]})
+
+
 class ImportGuestInvoicesSerializer(serializers.Serializer):
     """
     Takes the exact shape GuestInvoiceFlow stores in localStorage and
-    creates one Invoice per entry for the signed-in user. Entries whose
-    invoice_number already exists for this user (e.g. a retry after a
-    partial failure) are skipped, not errored.
-
-    Note: the global CamelCaseJSONParser has already converted the
-    incoming payload's keys to snake_case by the time it reaches here —
-    "invoiceNumber" arrives as "invoice_number", "unitPrice" inside each
-    item as "unit_price", etc.
+    creates one Invoice per entry. Also bumps the user's server-side
+    invoice_counter past the highest imported number, so dashboard-
+    created invoices never collide with guest-mode numbering.
     """
+
     invoices = serializers.ListField(child=serializers.DictField())
 
     def create(self, validated_data):
@@ -50,4 +120,33 @@ class ImportGuestInvoicesSerializer(serializers.Serializer):
                 paid_date_display=raw.get("paid_date"),
             )
             created.append(invoice)
+
+        if created:
+            max_seq = max(extract_invoice_seq(inv.invoice_number) for inv in created)
+            if max_seq > user.invoice_counter:
+                user.invoice_counter = max_seq
+                user.save(update_fields=["invoice_counter"])
+
         return created
+
+
+class CreateInvoiceShareSerializer(serializers.Serializer):
+    """
+    Backs the "Share link" action from both guest mode (no auth) and
+    the dashboard. Takes a full invoice snapshot already generated on
+    the frontend and stores it verbatim.
+    """
+
+    business_name = serializers.CharField(max_length=255)
+    customer_name = serializers.CharField(max_length=255)
+    invoice_number = serializers.CharField(max_length=32)
+    items = serializers.ListField(child=serializers.DictField())
+    total = serializers.DecimalField(max_digits=12, decimal_places=2)
+    status = serializers.ChoiceField(choices=Invoice.Status.choices)
+    created_at = serializers.CharField(source="created_at_display")
+    paid_date = serializers.CharField(source="paid_date_display", required=False, allow_null=True)
+
+    def create(self, validated_data):
+        request = self.context["request"]
+        user = request.user if request.user.is_authenticated else None
+        return InvoiceShare.objects.create(user=user, **validated_data)

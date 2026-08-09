@@ -1,37 +1,12 @@
-import re
-
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
 
+from .phone import normalize_ng_phone
+
 User = get_user_model()
-
-# Same five valid Nigerian mobile prefixes as the frontend's phone.ts —
-# keep these in sync if either side changes.
-NG_PHONE_PATTERN = re.compile(r"^(70|80|81|90|91)\d{8}$")
-
-
-def normalize_ng_phone(raw: str) -> str:
-    """
-    Mirrors the frontend's normalizeNGPhone: accepts either 11 digits
-    starting with 0, or 10 digits with no leading 0. Returns local
-    "0XXXXXXXXXX" format. Raises ValidationError if invalid.
-    """
-    digits = re.sub(r"\D", "", raw or "")
-
-    if len(digits) == 11 and digits.startswith("0"):
-        rest = digits[1:]
-    elif len(digits) == 10 and not digits.startswith("0"):
-        rest = digits
-    else:
-        rest = None
-
-    if not rest or not NG_PHONE_PATTERN.match(rest):
-        raise serializers.ValidationError("Enter a valid Nigerian number, e.g. 08031234567.")
-
-    return "0" + rest
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -77,14 +52,7 @@ class LoginSerializer(serializers.Serializer):
         email = attrs.get("email", "").strip().lower()
         password = attrs.get("password")
 
-        # Django's authenticate() always takes a "username" kwarg by
-        # convention, regardless of what USERNAME_FIELD is actually
-        # called on the model — ModelBackend maps it internally.
-        user = authenticate(
-            request=self.context.get("request"),
-            username=email,
-            password=password,
-        )
+        user = authenticate(request=self.context.get("request"), username=email, password=password)
         if user is None:
             raise serializers.ValidationError({"non_field_errors": ["Incorrect email or password."]})
         if not user.is_active:

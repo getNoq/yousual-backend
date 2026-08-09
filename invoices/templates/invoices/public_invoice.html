@@ -1,0 +1,71 @@
+{% load humanize %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ doc_label }} {{ share.invoice_number }} — {{ share.business_name }}</title>
+<style>
+  :root {
+    --bg: #FBF8F2; --ink: #221D17; --ink-soft: rgba(34,29,23,0.62);
+    --card: #FFFFFF; --line: rgba(34,29,23,0.12);
+    --peach: #FFE4CD; --mint: #DBF3E7; --green: #2E8F63; --red: #D96B57;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--ink); margin: 0; padding: 32px 16px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  }
+  .card { max-width: 480px; margin: 0 auto; background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 28px; }
+  .header { text-align: center; border-bottom: 1px solid var(--line); padding-bottom: 16px; margin-bottom: 16px; }
+  .meta { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); margin-bottom: 4px; }
+  .business { font-size: 26px; font-weight: 700; }
+  .date { font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
+  .row { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 8px; gap: 12px; }
+  .row.customer { color: var(--ink-soft); }
+  .items { margin: 16px 0; }
+  .total-row { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); padding-top: 16px; font-weight: 700; font-size: 22px; }
+  .status { text-align: center; margin-top: 16px; }
+  .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px; }
+  .badge.paid { background: var(--mint); color: var(--green); }
+  .badge.due { background: var(--peach); color: var(--red); }
+  .footer { text-align: center; margin-top: 24px; font-size: 12px; color: var(--ink-soft); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <div class="meta">{{ doc_label }} · {{ share.invoice_number }}</div>
+      <div class="business">{{ share.business_name }}</div>
+      <div class="date">
+        {% if share.status == "paid" %}Paid {{ share.paid_date_display|default:share.created_at_display }}{% else %}Issued {{ share.created_at_display }}{% endif %}
+      </div>
+    </div>
+
+    <div class="row customer">
+      <span>Customer</span>
+      <span>{{ share.customer_name }}</span>
+    </div>
+
+    <div class="items">
+      {% for item in items %}
+      <div class="row">
+        <span>{{ item.qty }} × {{ item.description }}</span>
+        <span>₦{{ item.subtotal|floatformat:0|intcomma }}</span>
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="total-row">
+      <span>Total</span>
+      <span>₦{{ share.total|floatformat:0|intcomma }}</span>
+    </div>
+
+    <div class="status">
+      <span class="badge {{ share.status }}">{% if share.status == "paid" %}PAID{% else %}OUTSTANDING{% endif %}</span>
+    </div>
+
+    <div class="footer">Powered by Yousual</div>
+  </div>
+</body>
+</html>
