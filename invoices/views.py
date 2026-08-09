@@ -87,18 +87,13 @@ class CreateInvoiceShareView(APIView):
 
 
 def public_invoice_view(request, share_id):
-    """
-    Plain (non-DRF) view — the page a customer actually lands on from
-    a shared WhatsApp link. No auth, no JSON: server-rendered HTML
-    styled to loosely match the frontend's BRAND tokens (kept in sync
-    manually with the inline <style> block in the template).
-    """
     try:
         share = InvoiceShare.objects.get(id=share_id)
     except InvoiceShare.DoesNotExist:
         raise Http404("This invoice link doesn't exist or has expired.")
 
     doc_label = "Receipt" if share.status == "paid" else "Invoice"
+    accent_color = share.brand_color or "#221D17"
 
     items_with_subtotal = []
     for item in share.items:
@@ -115,5 +110,5 @@ def public_invoice_view(request, share_id):
     return render(
         request,
         "invoices/public_invoice.html",
-        {"share": share, "doc_label": doc_label, "items": items_with_subtotal},
+        {"share": share, "doc_label": doc_label, "items": items_with_subtotal, "accent_color": accent_color},
     )

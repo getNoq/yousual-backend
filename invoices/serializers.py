@@ -96,6 +96,8 @@ class CreateInvoiceSerializer(serializers.Serializer):
                     status=status,
                     created_at_display=now_display,
                     paid_date_display=now_display if status == Invoice.Status.PAID else None,
+                    note=validated_data.get("note", ""),
+                    brand_color=validated_data.get("brand_color", ""),
                 )
             except IntegrityError:
                 continue
@@ -145,12 +147,6 @@ class ImportGuestInvoicesSerializer(serializers.Serializer):
 
 
 class CreateInvoiceShareSerializer(serializers.Serializer):
-    """
-    Backs the "Share link" action from both guest mode (no auth) and
-    the dashboard. Takes a full invoice snapshot already generated on
-    the frontend and stores it verbatim.
-    """
-
     business_name = serializers.CharField(max_length=255)
     customer_name = serializers.CharField(max_length=255)
     invoice_number = serializers.CharField(max_length=32)
@@ -159,6 +155,11 @@ class CreateInvoiceShareSerializer(serializers.Serializer):
     status = serializers.ChoiceField(choices=Invoice.Status.choices)
     created_at = serializers.CharField(source="created_at_display")
     paid_date = serializers.CharField(source="paid_date_display", required=False, allow_null=True)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=280, default="")
+    brand_color = serializers.CharField(required=False, allow_blank=True, default="")
+
+    def validate_brand_color(self, value):
+        return validate_brand_color(value)
 
     def create(self, validated_data):
         request = self.context["request"]

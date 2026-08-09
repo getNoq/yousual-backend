@@ -29,6 +29,7 @@
   .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px; }
   .badge.paid { background: var(--mint); color: var(--green); }
   .badge.due { background: var(--peach); color: var(--red); }
+  .note { text-align: center; margin-top: 24px; font-size: 16px; color: var(--ink-soft); }
   .footer { text-align: center; margin-top: 24px; font-size: 12px; color: var(--ink-soft); }
 </style>
 </head>
@@ -37,7 +38,8 @@
     <div class="header">
       <div class="meta">{{ doc_label }} · {{ share.invoice_number }}</div>
       <!-- <div class="business">{{ share.business_name }}</div> -->
-      <div class="business" style="color: {{ share.brand_color|default:'#221D17' }};">{{ share.business_name }}</div>
+      <!-- <div class="business" style="color: {{ share.brand_color|default:'#221D17' }};">{{ share.business_name }}</div> -->
+      <div class="business" style="color: {{ accent_color }};">{{ share.business_name }}</div>
       <div class="date">
         {% if share.status == "paid" %}Paid {{ share.paid_date_display|default:share.created_at_display }}{% else %}Issued {{ share.created_at_display }}{% endif %}
       </div>
@@ -58,16 +60,16 @@
     </div>
 
     <div class="total-row">
-      <span>Total</span>
-      <span>₦{{ share.total|floatformat:0|intcomma }}</span>
+        <span>Total</span>
+        <span style="color: {{ accent_color }};">₦{{ share.total|floatformat:0|intcomma }}</span>
     </div>
 
     <div class="status">
       <span class="badge {{ share.status }}">{% if share.status == "paid" %}PAID{% else %}OUTSTANDING{% endif %}</span>
     </div>
-    
+
     {% if share.note %}
-    <div class="footer" style="margin-top: 4px; font-style: italic;">{{ share.note }}</div>
+    <div class="note" style="margin-top: 4px;">{{ share.note }}</div>
     {% endif %}
 
     <div class="footer">Powered by Yousual</div>
