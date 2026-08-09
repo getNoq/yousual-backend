@@ -128,3 +128,6 @@ FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5174")
 # etc.) before this goes anywhere near production.
 EMAIL_BACKEND = os.environ.get("EMAIL_BACKEND", "django.core.mail.backends.console.EmailBackend")
 DEFAULT_FROM_EMAIL = os.environ.get("DEFAULT_FROM_EMAIL", "no-reply@yousual.ng")
+
+STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
