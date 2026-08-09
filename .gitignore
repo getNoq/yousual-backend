@@ -1,0 +1,39 @@
+# Environment variables — never commit real secrets
+.env
+.env.local
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+
+# Static files (collected on the server via collectstatic, not committed)
+staticfiles/
+
+# Migrations note: keep migrations/ committed (they're not ignored here)
+# — they're part of your schema history, not a build artifact.
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Testing / coverage
+.coverage
+htmlcov/
+.pytest_cache/
