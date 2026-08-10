@@ -55,7 +55,7 @@
 
     <div class="row customer">
       <span>Customer</span>
-      <span style="font-weight: 600;">{{ share.customer_name }}</span>
+      <span style="color: #111111; font-weight: 600;">{{ share.customer_name }}</span>
     </div>
 
     <div class="items">
@@ -68,12 +68,12 @@
     </div>
 
     <div class="total-row">
-        <span style="font-size: 26px;">Total</span>
-        <span style="color: {{ accent_color }};">NGN {{ share.total|floatformat:0|intcomma }}</span>
+        <span style="font-size: 24px;">Total</span>
+        <span style="font-size: 32px; color: {{ accent_color }};">NGN {{ share.total|floatformat:0|intcomma }}</span>
     </div>
 
     {% if share.note %}
-    <div class="note" style="margin-top: 4px;">{{ share.note }}</div>
+    <div class="note" style="margin-top: 16px;">{{ share.note }}</div>
     {% endif %}
 
     <div class="status">
