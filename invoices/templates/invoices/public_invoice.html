@@ -37,8 +37,9 @@
   .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px; }
   .badge.paid { background: var(--mint); color: var(--green); }
   .badge.due { background: var(--peach); color: var(--red); }
-  .note { text-align: center; margin-top: 24px; font-size: 16px; line-height: 22px; color: var(--ink-soft); }
-  .footer { text-align: center; margin-top: 24px; font-size: 14px; color: var(--ink-soft); }
+  .noteLabel { font-family: "Bebas Neue", sans-serif; font-size: 18px; font-weight: 400; color: #374151; margin-top: 16px; }
+  .note { text-align: center; margin-top: 4px; font-size: 14px; line-height: 20px; color: var(--ink-soft); }
+  .footer { text-align: center; margin-top: 24px; font-size: 14px; color: var(--ink-soft); border-top: 1px solid var(--line); padding-top: 16px; }
 </style>
 </head>
 <body>
@@ -72,13 +73,14 @@
         <span style="font-size: 32px; color: {{ accent_color }};">NGN {{ share.total|floatformat:0|intcomma }}</span>
     </div>
 
-    {% if share.note %}
-    <div class="note" style="margin-top: 16px;">{{ share.note }}</div>
-    {% endif %}
-
     <div class="status">
       <span class="badge {{ share.status }}">{% if share.status == "paid" %}PAID{% else %}OUTSTANDING{% endif %}</span>
     </div>
+
+    {% if share.note %}
+    <div class="noteLabel">Note:</div>
+    <div class="note" style="text-align: left; white-space: pre-wrap;">{{ share.note }}</div>
+    {% endif %}
 
     <div class="footer">Powered by Yousual</div>
   </div>

@@ -112,3 +112,13 @@ def public_invoice_view(request, share_id):
         "invoices/public_invoice.html",
         {"share": share, "doc_label": doc_label, "items": items_with_subtotal, "accent_color": accent_color},
     )
+
+class InvoiceDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, invoice_id):
+        try:
+            invoice = Invoice.objects.get(id=invoice_id, user=request.user)
+        except Invoice.DoesNotExist:
+            return Response({"message": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(InvoiceSerializer(invoice).data)
