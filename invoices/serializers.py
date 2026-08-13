@@ -19,6 +19,10 @@ def validate_brand_color(value: str) -> str:
     return value
 
 
+def _compute_total(items) -> Decimal:
+    return sum(Decimal(str(i["qty"])) * Decimal(str(i["unit_price"])) for i in items)
+
+
 class PaymentSerializer(serializers.ModelSerializer):
     paid_date = serializers.CharField(source="paid_date_display")
 
@@ -43,12 +47,6 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
 
 class InvoiceDetailSerializer(InvoiceSerializer):
-    """
-    Adds the full payment history — only used for the single-invoice
-    detail/creation response, not the paginated list, so listing many
-    invoices doesn't pull every payment row for each one.
-    """
-
     payments = PaymentSerializer(many=True, read_only=True)
 
     class Meta(InvoiceSerializer.Meta):
@@ -56,10 +54,19 @@ class InvoiceDetailSerializer(InvoiceSerializer):
 
 
 class CreateInvoiceSerializer(serializers.Serializer):
+    """
+    Backs the dashboard's "Record a sale" flow. No status field —
+    status is always derived from the payment ledger (see
+    Invoice.recompute_status). Instead, this takes amount_paid_now:
+    how much the customer actually handed over at the point of sale,
+    which may be 0 (nothing yet), the full total (paid in full), or
+    anything in between (a deposit/instalment).
+    """
+
     customer_name = serializers.CharField(max_length=255)
     customer_phone = serializers.CharField(required=False, allow_blank=True, default="")
     items = serializers.ListField(child=serializers.DictField())
-    status = serializers.ChoiceField(choices=[Invoice.Status.PAID, Invoice.Status.DUE], default=Invoice.Status.DUE)
+    amount_paid_now = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=Decimal("0"))
     note = serializers.CharField(required=False, allow_blank=True, max_length=280, default="")
     brand_color = serializers.CharField(required=False, allow_blank=True, default="")
 
@@ -76,6 +83,11 @@ class CreateInvoiceSerializer(serializers.Serializer):
 
     def validate_brand_color(self, value):
         return validate_brand_color(value)
+
+    def validate_amount_paid_now(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Amount received can't be negative.")
+        return value
 
     def validate_items(self, value):
         cleaned = []
@@ -95,11 +107,20 @@ class CreateInvoiceSerializer(serializers.Serializer):
             raise serializers.ValidationError("Add at least one item with a description, quantity, and price.")
         return cleaned
 
+    def validate(self, attrs):
+        total = _compute_total(attrs.get("items", []))
+        amount_paid_now = attrs.get("amount_paid_now", Decimal("0"))
+        if amount_paid_now > total:
+            raise serializers.ValidationError(
+                {"amount_paid_now": f"That's more than the sale total (₦{total})."}
+            )
+        return attrs
+
     def create(self, validated_data):
         user = self.context["request"].user
         items = validated_data["items"]
-        total = sum(Decimal(str(i["qty"])) * Decimal(str(i["unit_price"])) for i in items)
-        status = validated_data["status"]
+        total = _compute_total(items)
+        amount_paid_now = validated_data.get("amount_paid_now", Decimal("0"))
         now_display = timezone.now().strftime("%d %b %Y")
 
         invoice = None
@@ -125,10 +146,8 @@ class CreateInvoiceSerializer(serializers.Serializer):
         if invoice is None:
             raise serializers.ValidationError({"non_field_errors": ["Couldn't generate an invoice number. Try again."]})
 
-        # Even "created as paid" invoices get a real Payment row — the
-        # ledger is always the source of truth, never just a status flag.
-        if status == Invoice.Status.PAID:
-            Payment.objects.create(invoice=invoice, amount=total, paid_date_display=now_display)
+        if amount_paid_now > 0:
+            Payment.objects.create(invoice=invoice, amount=amount_paid_now, paid_date_display=now_display)
             invoice.recompute_status()
 
         return invoice
@@ -184,10 +203,6 @@ class ImportGuestInvoicesSerializer(serializers.Serializer):
                 note=raw.get("note") or "",
                 brand_color=raw.get("brand_color") or "",
             )
-            # Guest mode only ever produces paid/due (no ledger client-
-            # side) — backfill a full payment for anything arriving
-            # already marked paid, so the ledger stays authoritative
-            # even for invoices that started life outside an account.
             if raw.get("status") == "paid":
                 Payment.objects.create(
                     invoice=invoice,

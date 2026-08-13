@@ -1,4 +1,5 @@
-from django.db.models import Sum
+from django.db.models import DecimalField, Sum, Value
+from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.shortcuts import render
 from rest_framework import permissions, status
@@ -31,6 +32,45 @@ class InvoiceListCreateView(ListAPIView):
         serializer.is_valid(raise_exception=True)
         invoice = serializer.save()
         return Response(InvoiceDetailSerializer(invoice).data, status=status.HTTP_201_CREATED)
+
+
+class OwedInvoicesView(ListAPIView):
+    """
+    Backs "Who owes me" — every sale for this user that isn't fully
+    paid, sorted either oldest-first (default) or by largest
+    outstanding balance. amount_paid/amount_due are computed
+    properties on Invoice (summed from Payment), so sorting by balance
+    needs a DB-level annotation rather than the Python property.
+    """
+
+    serializer_class = InvoiceSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = InvoicePagination
+
+    def get_queryset(self):
+        qs = (
+            Invoice.objects.filter(user=self.request.user)
+            .exclude(status=Invoice.Status.PAID)
+            .annotate(
+                paid_sum=Coalesce(
+                    Sum("payments__amount"),
+                    Value(0),
+                    output_field=DecimalField(max_digits=12, decimal_places=2),
+                )
+            )
+            .annotate(balance=Value(0, output_field=DecimalField(max_digits=12, decimal_places=2)))
+        )
+        # Django can't subtract two annotated fields directly inside
+        # .annotate() in a single pass on all backends reliably, so the
+        # actual balance ordering is done with an F() expression here.
+        from django.db.models import F
+
+        qs = qs.annotate(balance=F("total") - F("paid_sum"))
+
+        sort = self.request.query_params.get("sort", "oldest")
+        if sort == "largest":
+            return qs.order_by("-balance")
+        return qs.order_by("recorded_at")
 
 
 class InvoiceDetailView(APIView):
