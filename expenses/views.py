@@ -1,0 +1,189 @@
+from datetime import date, timedelta
+
+from django.db.models import Q, Sum
+from django.utils import timezone
+from djangorestframework_camel_case.parser import CamelCaseFormParser, CamelCaseJSONParser, CamelCaseMultiPartParser
+from rest_framework import permissions, status
+from rest_framework.generics import ListAPIView
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from invoices.models import Invoice, Payment
+from invoices.pagination import InvoicePagination
+
+from .models import Expense
+from .serializers import CreateExpenseSerializer, ExpenseSerializer
+
+PAGE_SIZE = InvoicePagination.page_size
+
+
+def _resolve_date_range(request):
+    """
+    Returns (date_from, date_to) as date objects for the requested
+    range preset, or (None, None) for "all time". "week" means the
+    last 7 days (rolling), not the current calendar week; "month"
+    means the current calendar month to date.
+    """
+    range_param = request.query_params.get("range", "all")
+    today = timezone.localdate()
+
+    if range_param == "today":
+        return today, today
+    if range_param == "week":
+        return today - timedelta(days=6), today
+    if range_param == "month":
+        return today.replace(day=1), today
+    if range_param == "custom":
+        raw_from = request.query_params.get("date_from")
+        raw_to = request.query_params.get("date_to")
+        try:
+            df = date.fromisoformat(raw_from) if raw_from else None
+            dt = date.fromisoformat(raw_to) if raw_to else None
+            return df, dt
+        except ValueError:
+            return None, None
+    return None, None
+
+
+class ExpenseListCreateView(ListAPIView):
+    serializer_class = ExpenseSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    pagination_class = InvoicePagination
+    # Overrides the global JSON-only parsers — this view accepts a file
+    # upload, so it needs multipart support too.
+    parser_classes = [CamelCaseMultiPartParser, CamelCaseFormParser, CamelCaseJSONParser]
+
+    def get_queryset(self):
+        return Expense.objects.filter(user=self.request.user)
+
+    def get_serializer_context(self):
+        return {"request": self.request}
+
+    def post(self, request):
+        serializer = CreateExpenseSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        expense = serializer.save()
+        return Response(
+            ExpenseSerializer(expense, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class OverviewSummaryView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        date_from, date_to = _resolve_date_range(request)
+
+        payments = Payment.objects.filter(invoice__user=user)
+        expenses = Expense.objects.filter(user=user)
+        if date_from:
+            payments = payments.filter(recorded_at__date__gte=date_from)
+            expenses = expenses.filter(expense_date__gte=date_from)
+        if date_to:
+            payments = payments.filter(recorded_at__date__lte=date_to)
+            expenses = expenses.filter(expense_date__lte=date_to)
+
+        total_sales = payments.aggregate(s=Sum("amount"))["s"] or 0
+        total_expenses = expenses.aggregate(s=Sum("amount"))["s"] or 0
+        profit = total_sales - total_expenses
+
+        # Outstanding is always a current snapshot ("what's owed right
+        # now"), independent of whatever date range is selected above.
+        open_invoices = Invoice.objects.filter(user=user).exclude(status=Invoice.Status.PAID)
+        total_open = open_invoices.aggregate(s=Sum("total"))["s"] or 0
+        total_paid_on_open = Payment.objects.filter(invoice__in=open_invoices).aggregate(s=Sum("amount"))["s"] or 0
+        total_outstanding = total_open - total_paid_on_open
+
+        return Response(
+            {
+                "total_sales": float(total_sales),
+                "total_expenses": float(total_expenses),
+                "profit": float(profit),
+                "total_outstanding": float(total_outstanding),
+            }
+        )
+
+
+class OverviewFeedView(APIView):
+    """
+    Combines Invoice and Expense into one chronological, filterable,
+    searchable feed. Merged and paginated in Python rather than at the
+    DB level — see the note above on why.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        type_param = request.query_params.get("type", "all")
+        search = request.query_params.get("search", "").strip()
+        sort = request.query_params.get("sort", "newest")
+        date_from, date_to = _resolve_date_range(request)
+        try:
+            page = max(1, int(request.query_params.get("page", 1)))
+        except ValueError:
+            page = 1
+
+        items = []
+
+        if type_param in ("all", "sale"):
+            invoices = Invoice.objects.filter(user=user)
+            if date_from:
+                invoices = invoices.filter(recorded_at__date__gte=date_from)
+            if date_to:
+                invoices = invoices.filter(recorded_at__date__lte=date_to)
+            if search:
+                invoices = invoices.filter(customer_name__icontains=search)
+            for inv in invoices:
+                items.append(
+                    {
+                        "id": str(inv.id),
+                        "type": "sale",
+                        "date": inv.recorded_at.date().isoformat(),
+                        "date_display": inv.created_at_display,
+                        "title": inv.customer_name,
+                        "subtitle": inv.get_status_display(),
+                        "amount": float(inv.total),
+                        "status": inv.status,
+                        "invoice_id": str(inv.id),
+                        "receipt_url": None,
+                    }
+                )
+
+        if type_param in ("all", "expense"):
+            expenses = Expense.objects.filter(user=user)
+            if date_from:
+                expenses = expenses.filter(expense_date__gte=date_from)
+            if date_to:
+                expenses = expenses.filter(expense_date__lte=date_to)
+            if search:
+                expenses = expenses.filter(Q(category__icontains=search) | Q(note__icontains=search))
+            for exp in expenses:
+                items.append(
+                    {
+                        "id": str(exp.id),
+                        "type": "expense",
+                        "date": exp.expense_date.isoformat(),
+                        "date_display": exp.expense_date.strftime("%d %b %Y"),
+                        "title": exp.get_category_display(),
+                        "subtitle": exp.note or "",
+                        "amount": float(exp.amount),
+                        "status": None,
+                        "invoice_id": None,
+                        "receipt_url": request.build_absolute_uri(exp.receipt.url) if exp.receipt else None,
+                    }
+                )
+
+        reverse = sort in ("newest", "amount_desc")
+        if sort in ("newest", "oldest"):
+            items.sort(key=lambda i: i["date"], reverse=reverse)
+        else:
+            items.sort(key=lambda i: i["amount"], reverse=reverse)
+
+        count = len(items)
+        start = (page - 1) * PAGE_SIZE
+        page_items = items[start : start + PAGE_SIZE]
+
+        return Response({"count": count, "results": page_items})
