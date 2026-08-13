@@ -18,12 +18,6 @@ PAGE_SIZE = InvoicePagination.page_size
 
 
 def _resolve_date_range(request):
-    """
-    Returns (date_from, date_to) as date objects for the requested
-    range preset, or (None, None) for "all time". "week" means the
-    last 7 days (rolling), not the current calendar week; "month"
-    means the current calendar month to date.
-    """
     range_param = request.query_params.get("range", "all")
     today = timezone.localdate()
 
@@ -49,8 +43,6 @@ class ExpenseListCreateView(ListAPIView):
     serializer_class = ExpenseSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = InvoicePagination
-    # Overrides the global JSON-only parsers — this view accepts a file
-    # upload, so it needs multipart support too.
     parser_classes = [CamelCaseMultiPartParser, CamelCaseFormParser, CamelCaseJSONParser]
 
     def get_queryset(self):
@@ -67,6 +59,17 @@ class ExpenseListCreateView(ListAPIView):
             ExpenseSerializer(expense, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class ExpenseDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, expense_id):
+        try:
+            expense = Expense.objects.get(id=expense_id, user=request.user)
+        except Expense.DoesNotExist:
+            return Response({"message": "Expense not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ExpenseSerializer(expense, context={"request": request}).data)
 
 
 class OverviewSummaryView(APIView):
@@ -89,8 +92,6 @@ class OverviewSummaryView(APIView):
         total_expenses = expenses.aggregate(s=Sum("amount"))["s"] or 0
         profit = total_sales - total_expenses
 
-        # Outstanding is always a current snapshot ("what's owed right
-        # now"), independent of whatever date range is selected above.
         open_invoices = Invoice.objects.filter(user=user).exclude(status=Invoice.Status.PAID)
         total_open = open_invoices.aggregate(s=Sum("total"))["s"] or 0
         total_paid_on_open = Payment.objects.filter(invoice__in=open_invoices).aggregate(s=Sum("amount"))["s"] or 0
@@ -107,12 +108,6 @@ class OverviewSummaryView(APIView):
 
 
 class OverviewFeedView(APIView):
-    """
-    Combines Invoice and Expense into one chronological, filterable,
-    searchable feed. Merged and paginated in Python rather than at the
-    DB level — see the note above on why.
-    """
-
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
@@ -141,13 +136,15 @@ class OverviewFeedView(APIView):
                     {
                         "id": str(inv.id),
                         "type": "sale",
+                        "number": inv.invoice_number,
                         "date": inv.recorded_at.date().isoformat(),
                         "date_display": inv.created_at_display,
                         "title": inv.customer_name,
-                        "subtitle": inv.get_status_display(),
+                        "meta_label": "Receipt" if inv.status == Invoice.Status.PAID else "Invoice",
                         "amount": float(inv.total),
                         "status": inv.status,
                         "invoice_id": str(inv.id),
+                        "expense_id": None,
                         "receipt_url": None,
                     }
                 )
@@ -159,19 +156,21 @@ class OverviewFeedView(APIView):
             if date_to:
                 expenses = expenses.filter(expense_date__lte=date_to)
             if search:
-                expenses = expenses.filter(Q(category__icontains=search) | Q(note__icontains=search))
+                expenses = expenses.filter(Q(title__icontains=search) | Q(category__icontains=search) | Q(note__icontains=search))
             for exp in expenses:
                 items.append(
                     {
                         "id": str(exp.id),
                         "type": "expense",
+                        "number": exp.expense_number,
                         "date": exp.expense_date.isoformat(),
                         "date_display": exp.expense_date.strftime("%d %b %Y"),
-                        "title": exp.get_category_display(),
-                        "subtitle": exp.note or "",
+                        "title": exp.title,
+                        "meta_label": exp.get_category_display(),
                         "amount": float(exp.amount),
                         "status": None,
                         "invoice_id": None,
+                        "expense_id": str(exp.id),
                         "receipt_url": request.build_absolute_uri(exp.receipt.url) if exp.receipt else None,
                     }
                 )

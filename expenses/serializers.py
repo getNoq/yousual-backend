@@ -1,4 +1,6 @@
+from django.db import IntegrityError
 from rest_framework import serializers
+
 from .models import Expense
 
 ALLOWED_RECEIPT_EXTENSIONS = {"jpg", "jpeg", "png", "pdf"}
@@ -11,7 +13,10 @@ class ExpenseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Expense
-        fields = ["id", "amount", "category", "category_display", "note", "expense_date", "receipt_url", "recorded_at"]
+        fields = [
+            "id", "expense_number", "title", "amount", "category", "category_display",
+            "note", "expense_date", "receipt_url", "recorded_at",
+        ]
 
     def get_receipt_url(self, obj):
         request = self.context.get("request")
@@ -23,11 +28,17 @@ class ExpenseSerializer(serializers.ModelSerializer):
 class CreateExpenseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Expense
-        fields = ["amount", "category", "note", "expense_date", "receipt"]
+        fields = ["title", "amount", "category", "note", "expense_date", "receipt"]
         extra_kwargs = {
             "expense_date": {"required": False},
             "note": {"required": False},
         }
+
+    def validate_title(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Title is required.")
+        return value
 
     def validate_amount(self, value):
         if value <= 0:
@@ -45,5 +56,11 @@ class CreateExpenseSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
-        validated_data["user"] = self.context["request"].user
-        return Expense.objects.create(**validated_data)
+        user = self.context["request"].user
+        for _ in range(3):
+            expense_number = user.next_expense_number()
+            try:
+                return Expense.objects.create(user=user, expense_number=expense_number, **validated_data)
+            except IntegrityError:
+                continue
+        raise serializers.ValidationError({"non_field_errors": ["Couldn't generate an expense number. Try again."]})
