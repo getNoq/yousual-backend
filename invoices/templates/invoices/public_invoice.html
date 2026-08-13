@@ -11,6 +11,7 @@
     --bg: #FBF8F2; --ink: #221D17; --ink-soft: rgba(34,29,23,0.62);
     --card: #FFFFFF; --line: rgba(34,29,23,0.12);
     --peach: #FFE4CD; --mint: #DBF3E7; --green: #2E8F63; --red: #D96B57;
+    --amber: #FDECC8; --amber-strong: #B7791F;
   }
   * { box-sizing: border-box; }
   body {
@@ -24,7 +25,7 @@
   
   /* Apply Bebas Neue specifically to the business name */
   .business { font-size: 36px; font-weight: 400; font-family: "Bebas Neue", sans-serif; }
-  
+
   .date { font-size: 12px; color: var(--ink-soft); margin-top: 4px; }
   .row { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 8px; gap: 12px; }
   .row.customer { color: var(--ink-soft); }
@@ -37,6 +38,8 @@
   .badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px; }
   .badge.paid { background: var(--mint); color: var(--green); }
   .badge.due { background: var(--peach); color: var(--red); }
+  .badge.partially_paid { background: var(--amber); color: var(--amber-strong); }
+  .payment-summary { font-size: 14px; color: var(--ink-soft); margin-top: 8px; }
   .noteLabel { font-family: "Bebas Neue", sans-serif; font-size: 18px; font-weight: 400; color: #374151; margin-top: 16px; }
   .note { text-align: center; margin-top: 4px; font-size: 14px; line-height: 20px; color: var(--ink-soft); }
   .footer { text-align: center; margin-top: 24px; font-size: 14px; color: var(--ink-soft); border-top: 1px solid var(--line); padding-top: 16px; }
@@ -74,7 +77,16 @@
     </div>
 
     <div class="status">
-      <span class="badge {{ share.status }}">{% if share.status == "paid" %}PAID{% else %}OUTSTANDING{% endif %}</span>
+      <!-- <span class="badge {{ share.status }}">{% if share.status == "paid" %}PAID{% else %}OUTSTANDING{% endif %}</span> -->
+
+      {% if share.status == "paid" %}
+        <span class="badge paid">PAID</span>
+      {% elif share.status == "partially_paid" %}
+        <span class="badge partially_paid">PARTIALLY PAID</span>
+        <div class="payment-summary">₦{{ share.amount_paid|floatformat:0|intcomma }} paid · ₦{{ amount_due|floatformat:0|intcomma }} outstanding</div>
+      {% else %}
+        <span class="badge due">OUTSTANDING</span>
+      {% endif %}
     </div>
 
     {% if share.note %}

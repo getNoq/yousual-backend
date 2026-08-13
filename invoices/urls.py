@@ -6,7 +6,7 @@ from .views import (
     InvoiceDetailView,
     InvoiceListCreateView,
     InvoiceSummaryView,
-    MarkInvoicePaidView,
+    RecordPaymentView,
 )
 
 urlpatterns = [
@@ -15,5 +15,5 @@ urlpatterns = [
     path("import-guest/", ImportGuestInvoicesView.as_view(), name="invoice-import-guest"),
     path("share/", CreateInvoiceShareView.as_view(), name="invoice-share"),
     path("<uuid:invoice_id>/", InvoiceDetailView.as_view(), name="invoice-detail"),
-    path("<uuid:invoice_id>/mark-paid/", MarkInvoicePaidView.as_view(), name="invoice-mark-paid"),
+    path("<uuid:invoice_id>/payments/", RecordPaymentView.as_view(), name="invoice-record-payment"),
 ]

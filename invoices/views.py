@@ -6,13 +6,15 @@ from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import Invoice, InvoiceShare
+from .models import Invoice, InvoiceShare, Payment
 from .pagination import InvoicePagination
 from .serializers import (
     CreateInvoiceSerializer,
     CreateInvoiceShareSerializer,
     ImportGuestInvoicesSerializer,
+    InvoiceDetailSerializer,
     InvoiceSerializer,
+    RecordPaymentSerializer,
 )
 
 
@@ -28,38 +30,53 @@ class InvoiceListCreateView(ListAPIView):
         serializer = CreateInvoiceSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         invoice = serializer.save()
-        return Response(InvoiceSerializer(invoice).data, status=status.HTTP_201_CREATED)
+        return Response(InvoiceDetailSerializer(invoice).data, status=status.HTTP_201_CREATED)
+
+
+class InvoiceDetailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, invoice_id):
+        try:
+            invoice = Invoice.objects.get(id=invoice_id, user=request.user)
+        except Invoice.DoesNotExist:
+            return Response({"message": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(InvoiceDetailSerializer(invoice).data)
+
+
+class RecordPaymentView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, invoice_id):
+        try:
+            invoice = Invoice.objects.get(id=invoice_id, user=request.user)
+        except Invoice.DoesNotExist:
+            return Response({"message": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = RecordPaymentSerializer(data=request.data, context={"invoice": invoice})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        invoice.refresh_from_db()
+        return Response(InvoiceDetailSerializer(invoice).data, status=status.HTTP_201_CREATED)
 
 
 class InvoiceSummaryView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        qs = Invoice.objects.filter(user=request.user)
-        total_received = qs.filter(status=Invoice.Status.PAID).aggregate(s=Sum("total"))["s"] or 0
-        total_outstanding = qs.filter(status=Invoice.Status.DUE).aggregate(s=Sum("total"))["s"] or 0
+        invoices = Invoice.objects.filter(user=request.user)
+        total_count = invoices.count()
+        total_all = invoices.aggregate(s=Sum("total"))["s"] or 0
+        total_received = Payment.objects.filter(invoice__user=request.user).aggregate(s=Sum("amount"))["s"] or 0
+        total_outstanding = total_all - total_received
         return Response(
             {
-                "total_count": qs.count(),
+                "total_count": total_count,
                 "total_received": float(total_received),
                 "total_outstanding": float(total_outstanding),
             }
         )
-
-
-class MarkInvoicePaidView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def patch(self, request, invoice_id):
-        try:
-            invoice = Invoice.objects.get(id=invoice_id, user=request.user)
-        except Invoice.DoesNotExist:
-            return Response({"message": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
-
-        invoice.status = Invoice.Status.PAID
-        invoice.paid_date_display = request.data.get("paid_date", "")
-        invoice.save(update_fields=["status", "paid_date_display"])
-        return Response(InvoiceSerializer(invoice).data)
 
 
 class ImportGuestInvoicesView(APIView):
@@ -73,9 +90,6 @@ class ImportGuestInvoicesView(APIView):
 
 
 class CreateInvoiceShareView(APIView):
-    # AllowAny — guest mode has no auth at all, and this endpoint only
-    # ever stores a snapshot the client already has; it doesn't read
-    # or expose anything from any account.
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
@@ -103,22 +117,16 @@ def public_invoice_view(request, share_id):
             subtotal = float(qty) * float(unit_price)
         except (TypeError, ValueError):
             subtotal = 0
-        items_with_subtotal.append(
-            {"description": item.get("description", ""), "qty": qty, "subtotal": subtotal}
-        )
+        items_with_subtotal.append({"description": item.get("description", ""), "qty": qty, "subtotal": subtotal})
 
     return render(
         request,
         "invoices/public_invoice.html",
-        {"share": share, "doc_label": doc_label, "items": items_with_subtotal, "accent_color": accent_color},
+        {
+            "share": share,
+            "doc_label": doc_label,
+            "items": items_with_subtotal,
+            "accent_color": accent_color,
+            "amount_due": share.amount_due,
+        },
     )
-
-class InvoiceDetailView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request, invoice_id):
-        try:
-            invoice = Invoice.objects.get(id=invoice_id, user=request.user)
-        except Invoice.DoesNotExist:
-            return Response({"message": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(InvoiceSerializer(invoice).data)

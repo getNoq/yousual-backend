@@ -1,10 +1,15 @@
+from decimal import Decimal
+
 from accounts.phone import normalize_ng_phone
+from django.db import IntegrityError
+from django.utils import timezone
 from rest_framework import serializers
 
-from .models import Invoice, InvoiceShare
+from .models import Invoice, InvoiceShare, Payment
 from .utils import extract_invoice_seq
 
 ALLOWED_BRAND_COLORS = {"#2E8F63", "#3B82F6", "#141414", "#7C3AED", "#F97316"}
+
 
 def validate_brand_color(value: str) -> str:
     if not value:
@@ -14,34 +19,49 @@ def validate_brand_color(value: str) -> str:
     return value
 
 
+class PaymentSerializer(serializers.ModelSerializer):
+    paid_date = serializers.CharField(source="paid_date_display")
+
+    class Meta:
+        model = Payment
+        fields = ["id", "amount", "paid_date"]
+
+
 class InvoiceSerializer(serializers.ModelSerializer):
     created_at = serializers.CharField(source="created_at_display")
     paid_date = serializers.CharField(source="paid_date_display", allow_null=True, required=False)
+    amount_paid = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    amount_due = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model = Invoice
         fields = [
             "id", "invoice_number", "business_name", "customer_name",
-            "customer_phone", "items", "total", "status", "note", "brand_color", "created_at", "paid_date",
+            "customer_phone", "items", "total", "status", "created_at", "paid_date",
+            "note", "brand_color", "amount_paid", "amount_due",
         ]
 
 
-class CreateInvoiceSerializer(serializers.Serializer):
+class InvoiceDetailSerializer(InvoiceSerializer):
     """
-    Used by the dashboard's "New invoice" form. business_name isn't
-    accepted here at all — it's always the signed-in user's own
-    account name, set server-side in create().
+    Adds the full payment history — only used for the single-invoice
+    detail/creation response, not the paginated list, so listing many
+    invoices doesn't pull every payment row for each one.
     """
 
+    payments = PaymentSerializer(many=True, read_only=True)
+
+    class Meta(InvoiceSerializer.Meta):
+        fields = InvoiceSerializer.Meta.fields + ["payments"]
+
+
+class CreateInvoiceSerializer(serializers.Serializer):
     customer_name = serializers.CharField(max_length=255)
     customer_phone = serializers.CharField(required=False, allow_blank=True, default="")
     items = serializers.ListField(child=serializers.DictField())
-    status = serializers.ChoiceField(choices=Invoice.Status.choices, default=Invoice.Status.DUE)
+    status = serializers.ChoiceField(choices=[Invoice.Status.PAID, Invoice.Status.DUE], default=Invoice.Status.DUE)
     note = serializers.CharField(required=False, allow_blank=True, max_length=280, default="")
     brand_color = serializers.CharField(required=False, allow_blank=True, default="")
-
-    def validate_brand_color(self, value):
-        return validate_brand_color(value)
 
     def validate_customer_name(self, value):
         value = value.strip()
@@ -53,6 +73,9 @@ class CreateInvoiceSerializer(serializers.Serializer):
         if not value:
             return ""
         return normalize_ng_phone(value)
+
+    def validate_brand_color(self, value):
+        return validate_brand_color(value)
 
     def validate_items(self, value):
         cleaned = []
@@ -73,19 +96,17 @@ class CreateInvoiceSerializer(serializers.Serializer):
         return cleaned
 
     def create(self, validated_data):
-        from django.db import IntegrityError
-        from django.utils import timezone
-
         user = self.context["request"].user
         items = validated_data["items"]
-        total = sum(i["qty"] * i["unit_price"] for i in items)
+        total = sum(Decimal(str(i["qty"])) * Decimal(str(i["unit_price"])) for i in items)
         status = validated_data["status"]
         now_display = timezone.now().strftime("%d %b %Y")
 
+        invoice = None
         for _ in range(3):
             invoice_number = user.next_invoice_number()
             try:
-                return Invoice.objects.create(
+                invoice = Invoice.objects.create(
                     user=user,
                     invoice_number=invoice_number,
                     business_name=user.business_name,
@@ -93,25 +114,52 @@ class CreateInvoiceSerializer(serializers.Serializer):
                     customer_phone=validated_data.get("customer_phone", ""),
                     items=items,
                     total=total,
-                    status=status,
+                    status=Invoice.Status.DUE,  # corrected below via recompute_status
                     created_at_display=now_display,
-                    paid_date_display=now_display if status == Invoice.Status.PAID else None,
                     note=validated_data.get("note", ""),
                     brand_color=validated_data.get("brand_color", ""),
                 )
+                break
             except IntegrityError:
                 continue
-        raise serializers.ValidationError({"non_field_errors": ["Couldn't generate an invoice number. Try again."]})
+        if invoice is None:
+            raise serializers.ValidationError({"non_field_errors": ["Couldn't generate an invoice number. Try again."]})
+
+        # Even "created as paid" invoices get a real Payment row — the
+        # ledger is always the source of truth, never just a status flag.
+        if status == Invoice.Status.PAID:
+            Payment.objects.create(invoice=invoice, amount=total, paid_date_display=now_display)
+            invoice.recompute_status()
+
+        return invoice
+
+
+class RecordPaymentSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+    paid_date = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Enter an amount greater than zero.")
+        return value
+
+    def validate(self, attrs):
+        invoice = self.context["invoice"]
+        if attrs["amount"] > invoice.amount_due:
+            raise serializers.ValidationError(
+                {"amount": f"That's more than what's outstanding (₦{invoice.amount_due})."}
+            )
+        return attrs
+
+    def create(self, validated_data):
+        invoice = self.context["invoice"]
+        paid_date = validated_data.get("paid_date") or timezone.now().strftime("%d %b %Y")
+        payment = Payment.objects.create(invoice=invoice, amount=validated_data["amount"], paid_date_display=paid_date)
+        invoice.recompute_status()
+        return payment
 
 
 class ImportGuestInvoicesSerializer(serializers.Serializer):
-    """
-    Takes the exact shape GuestInvoiceFlow stores in localStorage and
-    creates one Invoice per entry. Also bumps the user's server-side
-    invoice_counter past the highest imported number, so dashboard-
-    created invoices never collide with guest-mode numbering.
-    """
-
     invoices = serializers.ListField(child=serializers.DictField())
 
     def create(self, validated_data):
@@ -131,10 +179,22 @@ class ImportGuestInvoicesSerializer(serializers.Serializer):
                 customer_phone=raw.get("customer_phone") or "",
                 items=raw.get("items", []),
                 total=raw.get("total", 0),
-                status=raw.get("status", "due"),
+                status=Invoice.Status.DUE,  # corrected below via recompute_status
                 created_at_display=raw.get("created_at", ""),
-                paid_date_display=raw.get("paid_date"),
+                note=raw.get("note") or "",
+                brand_color=raw.get("brand_color") or "",
             )
+            # Guest mode only ever produces paid/due (no ledger client-
+            # side) — backfill a full payment for anything arriving
+            # already marked paid, so the ledger stays authoritative
+            # even for invoices that started life outside an account.
+            if raw.get("status") == "paid":
+                Payment.objects.create(
+                    invoice=invoice,
+                    amount=invoice.total,
+                    paid_date_display=raw.get("paid_date") or invoice.created_at_display,
+                )
+                invoice.recompute_status()
             created.append(invoice)
 
         if created:
@@ -153,6 +213,7 @@ class CreateInvoiceShareSerializer(serializers.Serializer):
     items = serializers.ListField(child=serializers.DictField())
     total = serializers.DecimalField(max_digits=12, decimal_places=2)
     status = serializers.ChoiceField(choices=Invoice.Status.choices)
+    amount_paid = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=Decimal("0"))
     created_at = serializers.CharField(source="created_at_display")
     paid_date = serializers.CharField(source="paid_date_display", required=False, allow_null=True)
     note = serializers.CharField(required=False, allow_blank=True, max_length=280, default="")
