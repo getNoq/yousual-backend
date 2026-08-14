@@ -12,7 +12,7 @@ User = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "email", "phone", "business_name"]
+        fields = ["id", "email", "phone", "business_name", "first_name", "last_name"]
 
 
 class SignUpSerializer(serializers.Serializer):
@@ -90,3 +90,52 @@ class ResetPasswordSerializer(serializers.Serializer):
         validate_password(attrs["password"], user=user)
         attrs["user"] = user
         return attrs
+
+
+class UpdateProfileSerializer(serializers.ModelSerializer):
+    """
+    Deliberately excludes email — changing a login credential needs its
+    own careful, verified flow (confirming the new address, possibly
+    re-auth), not a plain profile field edit. Not built this pass.
+    """
+
+    class Meta:
+        model = User
+        fields = ["business_name", "first_name", "last_name", "phone"]
+
+    def validate_business_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Business name is required.")
+        return value
+
+    def validate_phone(self, value):
+        return normalize_ng_phone(value)
+
+    def validate_first_name(self, value):
+        return value.strip()
+
+    def validate_last_name(self, value):
+        return value.strip()
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True)
+
+    def validate_current_password(self, value):
+        user = self.context["request"].user
+        if not user.check_password(value):
+            raise serializers.ValidationError("Current password is incorrect.")
+        return value
+
+    def validate_new_password(self, value):
+        user = self.context["request"].user
+        validate_password(value, user=user)
+        return value
+
+    def save(self):
+        user = self.context["request"].user
+        user.set_password(self.validated_data["new_password"])
+        user.save(update_fields=["password"])
+        return user

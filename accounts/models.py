@@ -12,6 +12,8 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(unique=True)
     phone = models.CharField(max_length=11)
     business_name = models.CharField(max_length=255)
+    first_name = models.CharField(max_length=100, blank=True, default="")
+    last_name = models.CharField(max_length=100, blank=True, default="")
     invoice_counter = models.PositiveIntegerField(default=0)
     expense_counter = models.PositiveIntegerField(default=0)
 
