@@ -116,6 +116,13 @@ REST_FRAMEWORK = {
         "djangorestframework_camel_case.parser.CamelCaseJSONParser",
     ),
     "EXCEPTION_HANDLER": "accounts.exceptions.api_exception_handler",
+    "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.ScopedRateThrottle"],
+    "DEFAULT_THROTTLE_RATES": {
+        "auth_login": "10/min",
+        "auth_signup": "5/min",
+        "auth_forgot_password": "5/min",
+        "auth_resend_verification": "3/min",
+    },
 }
 
 SIMPLE_JWT = {

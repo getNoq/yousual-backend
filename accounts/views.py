@@ -29,6 +29,7 @@ def tokens_for_user(user):
 
 class SignUpView(APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "auth_signup"
 
     def post(self, request):
         serializer = SignUpSerializer(data=request.data)
@@ -42,6 +43,7 @@ class SignUpView(APIView):
 
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "auth_login"
 
     def post(self, request):
         serializer = LoginSerializer(data=request.data, context={"request": request})
@@ -75,6 +77,7 @@ class ChangePasswordView(APIView):
 
 class ForgotPasswordView(APIView):
     permission_classes = [permissions.AllowAny]
+    throttle_scope = "auth_forgot_password"
 
     def post(self, request):
         serializer = ForgotPasswordSerializer(data=request.data)
