@@ -6,6 +6,7 @@ from rest_framework import permissions, status
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.conf import settings
 
 from .models import Invoice, InvoiceShare, Payment
 from .pagination import InvoicePagination
@@ -128,7 +129,6 @@ class ImportGuestInvoicesView(APIView):
         created = serializer.save()
         return Response({"imported": InvoiceSerializer(created, many=True).data}, status=status.HTTP_201_CREATED)
 
-
 class CreateInvoiceShareView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -136,8 +136,20 @@ class CreateInvoiceShareView(APIView):
         serializer = CreateInvoiceShareSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         share = serializer.save()
-        url = request.build_absolute_uri(f"/i/{share.id}/")
+        url = f"https://share.yousual.ng/i/{share.id}/"
         return Response({"url": url}, status=status.HTTP_201_CREATED)
+
+# class CreateInvoiceShareView(APIView):
+#     permission_classes = [permissions.AllowAny]
+
+#     def post(self, request):
+#         serializer = CreateInvoiceShareSerializer(data=request.data, context={"request": request})
+#         serializer.is_valid(raise_exception=True)
+#         share = serializer.save()
+#         # url = request.build_absolute_uri(f"/i/{share.id}/")
+#         # url = f"{settings.FRONTEND_URL}/i/{share.id}/"
+#         url = f"https://share.yousual.ng/i/{share.id}/"
+#         return Response({"url": url}, status=status.HTTP_201_CREATED)
 
 
 def public_invoice_view(request, share_id):
@@ -170,3 +182,33 @@ def public_invoice_view(request, share_id):
             "amount_due": share.amount_due,
         },
     )
+
+# class PublicShareDetailView(APIView):
+#     """
+#     JSON version of the same data public_invoice_view renders as HTML —
+#     the frontend's new /i/:id route fetches this instead.
+#     """
+#     permission_classes = [permissions.AllowAny]
+
+#     def get(self, request, share_id):
+#         try:
+#             share = InvoiceShare.objects.get(id=share_id)
+#         except InvoiceShare.DoesNotExist:
+#             return Response({"message": "This invoice link doesn't exist or has expired."}, status=status.HTTP_404_NOT_FOUND)
+
+#         return Response(
+#             {
+#                 "business_name": share.business_name,
+#                 "customer_name": share.customer_name,
+#                 "invoice_number": share.invoice_number,
+#                 "items": share.items,
+#                 "total": float(share.total),
+#                 "status": share.status,
+#                 "amount_paid": float(share.amount_paid),
+#                 "amount_due": float(share.amount_due),
+#                 "created_at": share.created_at_display,
+#                 "paid_date": share.paid_date_display,
+#                 "note": share.note,
+#                 "brand_color": share.brand_color,
+#             }
+#         )
