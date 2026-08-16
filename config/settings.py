@@ -132,6 +132,7 @@ SIMPLE_JWT = {
 }
 
 FRONTEND_URL = os.environ.get("FRONTEND_URL", "http://localhost:5174")
+FRONTEND_SHARE_URL = os.environ.get("FRONTEND_SHARE_URL", "http://localhost:3000")
 
 # Prints reset emails to the runserver console instead of sending real
 # mail — fine for dev. Point this at a real backend (SMTP, Postmark,

@@ -136,7 +136,7 @@ class CreateInvoiceShareView(APIView):
         serializer = CreateInvoiceShareSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         share = serializer.save()
-        url = f"https://share.yousual.ng/i/{share.id}/"
+        url = f"{settings.FRONTEND_SHARE_URL}/i/{share.id}/"
         return Response({"url": url}, status=status.HTTP_201_CREATED)
 
 # class CreateInvoiceShareView(APIView):
@@ -146,6 +146,7 @@ class CreateInvoiceShareView(APIView):
 #         serializer = CreateInvoiceShareSerializer(data=request.data, context={"request": request})
 #         serializer.is_valid(raise_exception=True)
 #         share = serializer.save()
+#         url = f"https://share.yousual.ng/i/{share.id}/"
 #         # url = request.build_absolute_uri(f"/i/{share.id}/")
 #         # url = f"{settings.FRONTEND_URL}/i/{share.id}/"
 #         url = f"https://share.yousual.ng/i/{share.id}/"
