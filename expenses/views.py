@@ -52,6 +52,11 @@ class ExpenseListCreateView(ListAPIView):
         return {"request": self.request}
 
     def post(self, request):
+        if not request.user.is_email_verified:
+            return Response(
+                {"message": "Verify your email before recording new expenses.", "code": "email_not_verified"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = CreateExpenseSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         expense = serializer.save()

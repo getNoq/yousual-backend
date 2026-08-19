@@ -8,6 +8,7 @@ from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from .emails import send_password_reset_email, send_verification_email
 
 from .serializers import (
     ChangePasswordSerializer,
@@ -17,6 +18,7 @@ from .serializers import (
     SignUpSerializer,
     UpdateProfileSerializer,
     UserSerializer,
+    VerifyEmailSerializer
 )
 
 User = get_user_model()
@@ -35,6 +37,7 @@ class SignUpView(APIView):
         serializer = SignUpSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        send_verification_email(user)
         return Response(
             {"user": UserSerializer(user).data, "tokens": tokens_for_user(user)},
             status=status.HTTP_201_CREATED,
@@ -89,13 +92,7 @@ class ForgotPasswordView(APIView):
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             raw_token = default_token_generator.make_token(user)
             reset_link = f"{settings.FRONTEND_URL}/reset-password?token={uid}.{raw_token}"
-            send_mail(
-                subject="Reset your Yousual password",
-                message=f"Reset your password here: {reset_link}\n\nIf you didn't request this, you can ignore this email.",
-                from_email=settings.DEFAULT_FROM_EMAIL,
-                recipient_list=[user.email],
-                fail_silently=True,
-            )
+            send_password_reset_email(user)
 
         return Response({"message": "If an account exists for that email, a reset link is on its way."})
 
@@ -110,3 +107,25 @@ class ResetPasswordView(APIView):
         user.set_password(serializer.validated_data["password"])
         user.save(update_fields=["password"])
         return Response({"message": "Your password has been updated."})
+
+class VerifyEmailView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = VerifyEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data["user"]
+        user.is_email_verified = True
+        user.save(update_fields=["is_email_verified"])
+        return Response({"message": "Your email has been verified."})
+
+
+class ResendVerificationEmailView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_scope = "auth_resend_verification"
+
+    def post(self, request):
+        if request.user.is_email_verified:
+            return Response({"message": "Your email is already verified."})
+        send_verification_email(request.user)
+        return Response({"message": "Verification email sent."})

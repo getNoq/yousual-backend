@@ -3,6 +3,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
+from .tokens import email_verification_token
 
 from .phone import normalize_ng_phone
 
@@ -12,7 +13,7 @@ User = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "email", "phone", "business_name", "first_name", "last_name"]
+        fields = ["id", "email", "phone", "business_name", "first_name", "last_name", "is_email_verified"]
 
 
 class SignUpSerializer(serializers.Serializer):
@@ -139,3 +140,21 @@ class ChangePasswordSerializer(serializers.Serializer):
         user.set_password(self.validated_data["new_password"])
         user.save(update_fields=["password"])
         return user
+
+class VerifyEmailSerializer(serializers.Serializer):
+    token = serializers.CharField()
+
+    def validate(self, attrs):
+        token = attrs.get("token", "")
+        try:
+            uidb64, raw_token = token.split(".", 1)
+            uid = urlsafe_base64_decode(uidb64).decode()
+            user = User.objects.get(pk=uid)
+        except (ValueError, TypeError, User.DoesNotExist):
+            raise serializers.ValidationError({"non_field_errors": ["That verification link is invalid."]})
+
+        if not email_verification_token.check_token(user, raw_token):
+            raise serializers.ValidationError({"non_field_errors": ["That verification link has expired. Request a new one."]})
+
+        attrs["user"] = user
+        return attrs

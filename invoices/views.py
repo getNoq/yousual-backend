@@ -29,6 +29,11 @@ class InvoiceListCreateView(ListAPIView):
         return Invoice.objects.filter(user=self.request.user)
 
     def post(self, request):
+        if not request.user.is_email_verified:
+            return Response(
+                {"message": "Verify your email before recording new sales.", "code": "email_not_verified"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         serializer = CreateInvoiceSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         invoice = serializer.save()
