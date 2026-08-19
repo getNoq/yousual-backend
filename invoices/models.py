@@ -19,6 +19,9 @@ class Invoice(models.Model):
     business_name = models.CharField(max_length=255)
     customer_name = models.CharField(max_length=255)
     customer_phone = models.CharField(max_length=11, blank=True)
+    customer = models.ForeignKey(
+        "customers.Customer", null=True, blank=True, on_delete=models.SET_NULL, related_name="invoices"
+    )
     items = models.JSONField(default=list)
     total = models.DecimalField(max_digits=12, decimal_places=2)
     # Stored, denormalized status — kept in sync by recompute_status()

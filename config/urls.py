@@ -12,6 +12,7 @@ urlpatterns = [
     path("api/expenses/", include("expenses.urls")),
     path("api/overview/", include("expenses.overview_urls")),
     path("i/<uuid:share_id>/", public_invoice_view, name="public-invoice"),
+    path("api/customers/", include("customers.urls")),
 ]
 
 if settings.DEBUG:

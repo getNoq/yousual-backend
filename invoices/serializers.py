@@ -4,6 +4,7 @@ from accounts.phone import normalize_ng_phone
 from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import serializers
+from customers.models import Customer
 
 from .models import Invoice, InvoiceShare, Payment
 from .utils import extract_invoice_seq
@@ -146,6 +147,13 @@ class CreateInvoiceSerializer(serializers.Serializer):
         if invoice is None:
             raise serializers.ValidationError({"non_field_errors": ["Couldn't generate an invoice number. Try again."]})
 
+        customer = Customer.objects.upsert_from_sale(
+            user, validated_data["customer_name"], validated_data.get("customer_phone", "")
+        )
+        if customer:
+            invoice.customer = customer
+            invoice.save(update_fields=["customer"])
+
         if amount_paid_now > 0:
             Payment.objects.create(invoice=invoice, amount=amount_paid_now, paid_date_display=now_display)
             invoice.recompute_status()
@@ -203,6 +211,10 @@ class ImportGuestInvoicesSerializer(serializers.Serializer):
                 note=raw.get("note") or "",
                 brand_color=raw.get("brand_color") or "",
             )
+            customer = Customer.objects.upsert_from_sale(user, invoice.customer_name, invoice.customer_phone)
+            if customer:
+                invoice.customer = customer
+                invoice.save(update_fields=["customer"])
             if raw.get("status") == "paid":
                 Payment.objects.create(
                     invoice=invoice,
