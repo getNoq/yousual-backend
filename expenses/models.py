@@ -9,6 +9,11 @@ def expense_receipt_path(instance, filename):
     return f"expense_receipts/{instance.user_id}/{uuid.uuid4()}_{filename}"
 
 
+class ExpenseManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().filter(is_deleted=False)
+
+
 class Expense(models.Model):
     class Category(models.TextChoices):
         INVENTORY = "inventory", "Inventory / stock"
@@ -32,8 +37,18 @@ class Expense(models.Model):
     receipt = models.FileField(upload_to=expense_receipt_path, null=True, blank=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
 
+    is_deleted = models.BooleanField(default=False)
+    last_edited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    last_edited_at = models.DateTimeField(null=True, blank=True)
+
+    objects = ExpenseManager()
+    all_objects = models.Manager()
+
     class Meta:
         ordering = ["-expense_date", "-recorded_at"]
+        base_manager_name = "all_objects"
         constraints = [
             models.UniqueConstraint(fields=["user", "expense_number"], name="unique_expense_number_per_user")
         ]

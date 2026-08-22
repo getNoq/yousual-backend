@@ -10,10 +10,13 @@ class PaymentInline(admin.TabularInline):
 
 @admin.register(Invoice)
 class InvoiceAdmin(admin.ModelAdmin):
-    list_display = ["invoice_number", "user", "customer_name", "total", "status", "recorded_at"]
-    list_filter = ["status"]
+    list_display = ["invoice_number", "user", "customer_name", "total", "status", "is_deleted", "recorded_at"]
+    list_filter = ["status", "is_deleted"]
     search_fields = ["invoice_number", "customer_name", "business_name"]
     inlines = [PaymentInline]
+
+    def get_queryset(self, request):
+        return Invoice.all_objects.all()
 
 
 @admin.register(InvoiceShare)

@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import PublicShareDetailView 
+from .views import PublicShareDetailView, PaymentDetailView
 
 from .views import (
     CreateInvoiceShareView,
@@ -20,4 +20,5 @@ urlpatterns = [
     path("share/<uuid:share_id>/", PublicShareDetailView.as_view(), name="invoice-share-detail"),
     path("<uuid:invoice_id>/", InvoiceDetailView.as_view(), name="invoice-detail"),
     path("<uuid:invoice_id>/payments/", RecordPaymentView.as_view(), name="invoice-record-payment"),
+    path("<uuid:invoice_id>/payments/<uuid:payment_id>/", PaymentDetailView.as_view(), name="invoice-payment-delete"),
 ]

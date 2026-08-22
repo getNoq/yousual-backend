@@ -7,6 +7,11 @@ from django.db.models import Sum
 from django.utils import timezone
 
 
+class InvoiceManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().filter(is_deleted=False)
+
+
 class Invoice(models.Model):
     class Status(models.TextChoices):
         PAID = "paid", "Paid"
@@ -24,10 +29,6 @@ class Invoice(models.Model):
     )
     items = models.JSONField(default=list)
     total = models.DecimalField(max_digits=12, decimal_places=2)
-    # Stored, denormalized status — kept in sync by recompute_status()
-    # whenever a Payment changes. amount_paid/amount_due, below, are
-    # NEVER stored — always summed live from the Payment ledger, so
-    # there's exactly one source of truth and nothing can drift.
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DUE)
     note = models.CharField(max_length=280, blank=True, default="")
     brand_color = models.CharField(max_length=7, blank=True, default="")
@@ -36,8 +37,22 @@ class Invoice(models.Model):
     paid_date_display = models.CharField(max_length=32, blank=True, null=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
 
+    # New: soft delete + edit tracking
+    is_deleted = models.BooleanField(default=False)
+    last_edited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    last_edited_at = models.DateTimeField(null=True, blank=True)
+
+    objects = InvoiceManager()  # excludes soft-deleted — used everywhere by default
+    all_objects = models.Manager()  # unfiltered — admin and internal use only
+
     class Meta:
         ordering = ["-recorded_at"]
+        # Ensures GenericForeignKey lookups (the audit log) and any
+        # other Django-internal resolution can still find a
+        # soft-deleted invoice, even though Invoice.objects hides it.
+        base_manager_name = "all_objects"
         constraints = [
             models.UniqueConstraint(fields=["user", "invoice_number"], name="unique_invoice_number_per_user")
         ]
@@ -54,11 +69,6 @@ class Invoice(models.Model):
         return self.total - self.amount_paid
 
     def recompute_status(self) -> str:
-        """
-        Called after every payment is recorded. Derives status purely
-        from the ledger — the stored `status` field is a cache of
-        this, never edited directly anywhere else in the codebase.
-        """
         paid = self.amount_paid
         if paid <= 0:
             new_status = self.Status.DUE
@@ -79,36 +89,31 @@ class Invoice(models.Model):
         return new_status
 
 
-class Payment(models.Model):
-    """
-    One entry in an invoice's payment ledger — the single source of
-    truth for amount_paid/amount_due above. No edit/delete support yet
-    (matches the same "no edit/delete" line drawn on Invoice itself);
-    a wrong entry gets fixed via Django admin for now.
-    """
+class PaymentManager(models.Manager):
+    def get_queryset(self):
+        return super().get_queryset().filter(is_deleted=False)
 
+
+class Payment(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     invoice = models.ForeignKey(Invoice, on_delete=models.CASCADE, related_name="payments")
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     paid_date_display = models.CharField(max_length=32)
     recorded_at = models.DateTimeField(auto_now_add=True)
+    is_deleted = models.BooleanField(default=False)
+
+    objects = PaymentManager()
+    all_objects = models.Manager()
 
     class Meta:
         ordering = ["recorded_at"]
+        base_manager_name = "all_objects"
 
     def __str__(self):
         return f"₦{self.amount} on {self.invoice.invoice_number}"
 
 
 class InvoiceShare(models.Model):
-    """
-    A public, read-only snapshot of an invoice, created purely to back
-    a shareable link. Always a point-in-time copy — including
-    amount_paid — so an already-shared link intentionally keeps
-    showing what it showed at share time, even if more payments come
-    in on the real invoice afterward.
-    """
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="invoice_shares"

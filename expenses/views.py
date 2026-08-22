@@ -8,12 +8,16 @@ from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from teams.models import Membership
+from activity.services import diff_fields, log_change
+from activity.models import EditLog
+
 from invoices.models import Invoice, Payment
 from invoices.pagination import InvoicePagination
 from teams.services import get_active_team
 
 from .models import Expense
-from .serializers import CreateExpenseSerializer, ExpenseSerializer
+from .serializers import CreateExpenseSerializer, ExpenseSerializer, ExpenseDetailSerializer, UpdateExpenseSerializer
 
 PAGE_SIZE = InvoicePagination.page_size
 
@@ -70,6 +74,7 @@ class ExpenseListCreateView(ListAPIView):
 
 class ExpenseDetailView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [CamelCaseMultiPartParser, CamelCaseFormParser, CamelCaseJSONParser]
 
     def get(self, request, expense_id):
         team = get_active_team(request.user)
@@ -77,7 +82,53 @@ class ExpenseDetailView(APIView):
             expense = Expense.objects.get(id=expense_id, team=team)
         except Expense.DoesNotExist:
             return Response({"message": "Expense not found."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(ExpenseSerializer(expense, context={"request": request}).data)
+        return Response(ExpenseDetailSerializer(expense, context={"request": request}).data)
+
+    def patch(self, request, expense_id):
+        team = get_active_team(request.user)
+        try:
+            expense = Expense.objects.get(id=expense_id, team=team)
+        except Expense.DoesNotExist:
+            return Response({"message": "Expense not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        old_values = {
+            "title": expense.title, "amount": str(expense.amount), "category": expense.category,
+            "note": expense.note, "expense_date": str(expense.expense_date),
+        }
+
+        serializer = UpdateExpenseSerializer(expense, data=request.data, partial=True, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+
+        expense.last_edited_by = request.user
+        expense.last_edited_at = timezone.now()
+        expense.save(update_fields=["last_edited_by", "last_edited_at"])
+
+        new_values = {
+            "title": expense.title, "amount": str(expense.amount), "category": expense.category,
+            "note": expense.note, "expense_date": str(expense.expense_date),
+        }
+        changes = diff_fields(old_values, new_values)
+        if changes:
+            log_change(expense, EditLog.Action.EDITED, request.user, changes)
+
+        return Response(ExpenseDetailSerializer(expense, context={"request": request}).data)
+
+    def delete(self, request, expense_id):
+        team = get_active_team(request.user)
+        membership = Membership.objects.filter(team=team, user=request.user).first()
+        if not membership or membership.role != Membership.Role.OWNER:
+            return Response({"message": "Only the team owner can delete expenses."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            expense = Expense.objects.get(id=expense_id, team=team)
+        except Expense.DoesNotExist:
+            return Response({"message": "Expense not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        expense.is_deleted = True
+        expense.save(update_fields=["is_deleted"])
+        log_change(expense, EditLog.Action.DELETED, request.user)
+        return Response({"message": "Expense deleted."})
 
 
 class OverviewSummaryView(APIView):

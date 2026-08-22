@@ -1,11 +1,12 @@
 from decimal import Decimal
 
 from accounts.phone import normalize_ng_phone
+from customers.models import Customer
 from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import serializers
-from customers.models import Customer
 from teams.services import get_active_team
+from activity.services import get_edit_history
 
 from .models import Invoice, InvoiceShare, Payment
 from .utils import extract_invoice_seq
@@ -23,6 +24,25 @@ def validate_brand_color(value: str) -> str:
 
 def _compute_total(items) -> Decimal:
     return sum(Decimal(str(i["qty"])) * Decimal(str(i["unit_price"])) for i in items)
+
+
+def _clean_items(value):
+    cleaned = []
+    for item in value:
+        description = (item.get("description") or "").strip()
+        if not description:
+            continue
+        try:
+            qty = float(item.get("qty"))
+            unit_price = float(item.get("unit_price"))
+        except (TypeError, ValueError):
+            raise serializers.ValidationError("Each item needs a valid quantity and price.")
+        if qty <= 0 or unit_price <= 0:
+            raise serializers.ValidationError("Quantity and price must be greater than zero.")
+        cleaned.append({"description": description, "qty": qty, "unit_price": unit_price})
+    if not cleaned:
+        raise serializers.ValidationError("Add at least one item with a description, quantity, and price.")
+    return cleaned
 
 
 class PaymentSerializer(serializers.ModelSerializer):
@@ -50,9 +70,28 @@ class InvoiceSerializer(serializers.ModelSerializer):
 
 class InvoiceDetailSerializer(InvoiceSerializer):
     payments = PaymentSerializer(many=True, read_only=True)
+    edit_history = serializers.SerializerMethodField()
+    last_edited_by_email = serializers.SerializerMethodField()
 
     class Meta(InvoiceSerializer.Meta):
-        fields = InvoiceSerializer.Meta.fields + ["payments"]
+        fields = InvoiceSerializer.Meta.fields + [
+            "payments", "edit_history", "last_edited_by_email", "last_edited_at",
+        ]
+
+    def get_edit_history(self, obj):
+        return [
+            {
+                "id": str(log.id),
+                "action": log.action,
+                "changed_by": log.changed_by.email if log.changed_by else "Unknown",
+                "changes": log.changes,
+                "created_at": log.created_at,
+            }
+            for log in get_edit_history(obj)
+        ]
+
+    def get_last_edited_by_email(self, obj):
+        return obj.last_edited_by.email if obj.last_edited_by else None
 
 
 class CreateInvoiceSerializer(serializers.Serializer):
@@ -80,22 +119,7 @@ class CreateInvoiceSerializer(serializers.Serializer):
         return value
 
     def validate_items(self, value):
-        cleaned = []
-        for item in value:
-            description = (item.get("description") or "").strip()
-            if not description:
-                continue
-            try:
-                qty = float(item.get("qty"))
-                unit_price = float(item.get("unit_price"))
-            except (TypeError, ValueError):
-                raise serializers.ValidationError("Each item needs a valid quantity and price.")
-            if qty <= 0 or unit_price <= 0:
-                raise serializers.ValidationError("Quantity and price must be greater than zero.")
-            cleaned.append({"description": description, "qty": qty, "unit_price": unit_price})
-        if not cleaned:
-            raise serializers.ValidationError("Add at least one item with a description, quantity, and price.")
-        return cleaned
+        return _clean_items(value)
 
     def validate(self, attrs):
         total = _compute_total(attrs.get("items", []))
@@ -154,6 +178,31 @@ class CreateInvoiceSerializer(serializers.Serializer):
             invoice.recompute_status()
 
         return invoice
+
+
+class UpdateInvoiceSerializer(serializers.Serializer):
+    """
+    All fields optional (partial update). invoice_number, status, and
+    team/user ownership are deliberately not editable here — status is
+    derived from the payment ledger, never set directly, and
+    invoice_number is a permanent identifier once issued.
+    """
+    customer_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    customer_phone = serializers.CharField(required=False, allow_blank=True)
+    items = serializers.ListField(child=serializers.DictField(), required=False)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=280)
+    brand_color = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_customer_phone(self, value):
+        if not value:
+            return ""
+        return normalize_ng_phone(value)
+
+    def validate_brand_color(self, value):
+        return validate_brand_color(value)
+
+    def validate_items(self, value):
+        return _clean_items(value)
 
 
 class RecordPaymentSerializer(serializers.Serializer):

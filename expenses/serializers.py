@@ -5,7 +5,7 @@ from teams.services import get_active_team
 from .models import Expense
 
 ALLOWED_RECEIPT_EXTENSIONS = {"jpg", "jpeg", "png", "pdf"}
-MAX_RECEIPT_SIZE_BYTES = 5 * 1024 * 1024  # 5MB — keeps free-tier disk usage in check
+MAX_RECEIPT_SIZE_BYTES = 5 * 1024 * 1024
 
 
 class ExpenseSerializer(serializers.ModelSerializer):
@@ -24,6 +24,35 @@ class ExpenseSerializer(serializers.ModelSerializer):
         if obj.receipt and request:
             return request.build_absolute_uri(obj.receipt.url)
         return None
+
+
+class ExpenseDetailSerializer(ExpenseSerializer):
+    """
+    Separate from ExpenseSerializer specifically so the edit-history
+    lookup only runs on the single-expense detail fetch, not on every
+    row of a paginated list.
+    """
+    edit_history = serializers.SerializerMethodField()
+    last_edited_by_email = serializers.SerializerMethodField()
+
+    class Meta(ExpenseSerializer.Meta):
+        fields = ExpenseSerializer.Meta.fields + ["edit_history", "last_edited_by_email", "last_edited_at"]
+
+    def get_edit_history(self, obj):
+        from activity.services import get_edit_history
+        return [
+            {
+                "id": str(log.id),
+                "action": log.action,
+                "changed_by": log.changed_by.email if log.changed_by else "Unknown",
+                "changes": log.changes,
+                "created_at": log.created_at,
+            }
+            for log in get_edit_history(obj)
+        ]
+
+    def get_last_edited_by_email(self, obj):
+        return obj.last_edited_by.email if obj.last_edited_by else None
 
 
 class CreateExpenseSerializer(serializers.ModelSerializer):
@@ -66,3 +95,31 @@ class CreateExpenseSerializer(serializers.ModelSerializer):
             except IntegrityError:
                 continue
         raise serializers.ValidationError({"non_field_errors": ["Couldn't generate an expense number. Try again."]})
+
+
+class UpdateExpenseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Expense
+        fields = ["title", "amount", "category", "note", "expense_date", "receipt"]
+        extra_kwargs = {field: {"required": False} for field in ["title", "amount", "category", "note", "expense_date", "receipt"]}
+
+    def validate_title(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Title is required.")
+        return value
+
+    def validate_amount(self, value):
+        if value <= 0:
+            raise serializers.ValidationError("Enter an amount greater than zero.")
+        return value
+
+    def validate_receipt(self, value):
+        if not value:
+            return value
+        ext = value.name.rsplit(".", 1)[-1].lower() if "." in value.name else ""
+        if ext not in ALLOWED_RECEIPT_EXTENSIONS:
+            raise serializers.ValidationError("Attach a JPG, PNG, or PDF file.")
+        if value.size > MAX_RECEIPT_SIZE_BYTES:
+            raise serializers.ValidationError("Receipt file is too large — max 5MB.")
+        return value

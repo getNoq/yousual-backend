@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     "invoices",
     "expenses",
     "teams",
+    "activity",
     "django.contrib.humanize",
 ]
 

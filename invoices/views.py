@@ -1,13 +1,17 @@
+from django.conf import settings
 from django.db.models import DecimalField, F, Sum, Value
 from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.shortcuts import render
+from django.utils import timezone
 from rest_framework import permissions, status
 from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from django.conf import settings
+from teams.models import Membership
 from teams.services import get_active_team
+from activity.services import diff_fields, log_change
+from activity.models import EditLog
 
 from .models import Invoice, InvoiceShare, Payment
 from .pagination import InvoicePagination
@@ -18,6 +22,8 @@ from .serializers import (
     InvoiceDetailSerializer,
     InvoiceSerializer,
     RecordPaymentSerializer,
+    UpdateInvoiceSerializer,
+    _compute_total,
 )
 
 
@@ -80,6 +86,65 @@ class InvoiceDetailView(APIView):
             return Response({"message": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(InvoiceDetailSerializer(invoice).data)
 
+    def patch(self, request, invoice_id):
+        team = get_active_team(request.user)
+        try:
+            invoice = Invoice.objects.get(id=invoice_id, team=team)
+        except Invoice.DoesNotExist:
+            return Response({"message": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        old_values = {
+            "customer_name": invoice.customer_name,
+            "customer_phone": invoice.customer_phone,
+            "items": invoice.items,
+            "note": invoice.note,
+            "brand_color": invoice.brand_color,
+        }
+
+        serializer = UpdateInvoiceSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        for field in ["customer_name", "customer_phone", "note", "brand_color"]:
+            if field in data:
+                setattr(invoice, field, data[field])
+        if "items" in data:
+            invoice.items = data["items"]
+            invoice.total = _compute_total(data["items"])
+
+        invoice.last_edited_by = request.user
+        invoice.last_edited_at = timezone.now()
+        invoice.save()
+        invoice.recompute_status()  # total may have changed against existing payments
+
+        new_values = {
+            "customer_name": invoice.customer_name,
+            "customer_phone": invoice.customer_phone,
+            "items": invoice.items,
+            "note": invoice.note,
+            "brand_color": invoice.brand_color,
+        }
+        changes = diff_fields(old_values, new_values)
+        if changes:
+            log_change(invoice, EditLog.Action.EDITED, request.user, changes)
+
+        return Response(InvoiceDetailSerializer(invoice).data)
+
+    def delete(self, request, invoice_id):
+        team = get_active_team(request.user)
+        membership = Membership.objects.filter(team=team, user=request.user).first()
+        if not membership or membership.role != Membership.Role.OWNER:
+            return Response({"message": "Only the team owner can delete sales."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            invoice = Invoice.objects.get(id=invoice_id, team=team)
+        except Invoice.DoesNotExist:
+            return Response({"message": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        invoice.is_deleted = True
+        invoice.save(update_fields=["is_deleted"])
+        log_change(invoice, EditLog.Action.DELETED, request.user)
+        return Response({"message": "Sale deleted."})
 
 class RecordPaymentView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -97,6 +162,38 @@ class RecordPaymentView(APIView):
 
         invoice.refresh_from_db()
         return Response(InvoiceDetailSerializer(invoice).data, status=status.HTTP_201_CREATED)
+
+
+
+
+class PaymentDetailView(APIView):
+    """
+    Payments are delete-only, not editable — retroactively changing a
+    ledger entry's amount is a genuinely different, riskier operation
+    than fixing a typo in a name. If a payment was recorded wrong, the
+    correct fix is: delete it, then record a new correct one (the
+    "Record payment" action already handles that second half).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def delete(self, request, invoice_id, payment_id):
+        team = get_active_team(request.user)
+        membership = Membership.objects.filter(team=team, user=request.user).first()
+        if not membership or membership.role != Membership.Role.OWNER:
+            return Response({"message": "Only the team owner can delete payments."}, status=status.HTTP_403_FORBIDDEN)
+
+        try:
+            invoice = Invoice.objects.get(id=invoice_id, team=team)
+            payment = Payment.objects.get(id=payment_id, invoice=invoice)
+        except (Invoice.DoesNotExist, Payment.DoesNotExist):
+            return Response({"message": "Payment not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        payment.is_deleted = True
+        payment.save(update_fields=["is_deleted"])
+        log_change(payment, EditLog.Action.DELETED, request.user)
+        invoice.recompute_status()
+
+        return Response(InvoiceDetailSerializer(invoice).data)
 
 
 class InvoiceSummaryView(APIView):
@@ -171,10 +268,6 @@ def public_invoice_view(request, share_id):
     )
 
 class PublicShareDetailView(APIView):
-    """
-    JSON version of the same data public_invoice_view renders as HTML —
-    the frontend's new /i/:id route fetches this instead.
-    """
     permission_classes = [permissions.AllowAny]
 
     def get(self, request, share_id):
