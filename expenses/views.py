@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 
 from invoices.models import Invoice, Payment
 from invoices.pagination import InvoicePagination
+from teams.services import get_active_team
 
 from .models import Expense
 from .serializers import CreateExpenseSerializer, ExpenseSerializer
@@ -46,7 +47,8 @@ class ExpenseListCreateView(ListAPIView):
     parser_classes = [CamelCaseMultiPartParser, CamelCaseFormParser, CamelCaseJSONParser]
 
     def get_queryset(self):
-        return Expense.objects.filter(user=self.request.user)
+        team = get_active_team(self.request.user)
+        return Expense.objects.filter(team=team)
 
     def get_serializer_context(self):
         return {"request": self.request}
@@ -70,8 +72,9 @@ class ExpenseDetailView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, expense_id):
+        team = get_active_team(request.user)
         try:
-            expense = Expense.objects.get(id=expense_id, user=request.user)
+            expense = Expense.objects.get(id=expense_id, team=team)
         except Expense.DoesNotExist:
             return Response({"message": "Expense not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(ExpenseSerializer(expense, context={"request": request}).data)
@@ -81,11 +84,11 @@ class OverviewSummaryView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        user = request.user
+        team = get_active_team(request.user)
         date_from, date_to = _resolve_date_range(request)
 
-        payments = Payment.objects.filter(invoice__user=user)
-        expenses = Expense.objects.filter(user=user)
+        payments = Payment.objects.filter(invoice__team=team)
+        expenses = Expense.objects.filter(team=team)
         if date_from:
             payments = payments.filter(recorded_at__date__gte=date_from)
             expenses = expenses.filter(expense_date__gte=date_from)
@@ -97,7 +100,7 @@ class OverviewSummaryView(APIView):
         total_expenses = expenses.aggregate(s=Sum("amount"))["s"] or 0
         profit = total_sales - total_expenses
 
-        open_invoices = Invoice.objects.filter(user=user).exclude(status=Invoice.Status.PAID)
+        open_invoices = Invoice.objects.filter(team=team).exclude(status=Invoice.Status.PAID)
         total_open = open_invoices.aggregate(s=Sum("total"))["s"] or 0
         total_paid_on_open = Payment.objects.filter(invoice__in=open_invoices).aggregate(s=Sum("amount"))["s"] or 0
         total_outstanding = total_open - total_paid_on_open
@@ -116,7 +119,7 @@ class OverviewFeedView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        user = request.user
+        team = get_active_team(request.user)
         type_param = request.query_params.get("type", "all")
         search = request.query_params.get("search", "").strip()
         sort = request.query_params.get("sort", "newest")
@@ -129,7 +132,7 @@ class OverviewFeedView(APIView):
         items = []
 
         if type_param in ("all", "sale"):
-            invoices = Invoice.objects.filter(user=user)
+            invoices = Invoice.objects.filter(team=team)
             if date_from:
                 invoices = invoices.filter(recorded_at__date__gte=date_from)
             if date_to:
@@ -155,7 +158,7 @@ class OverviewFeedView(APIView):
                 )
 
         if type_param in ("all", "expense"):
-            expenses = Expense.objects.filter(user=user)
+            expenses = Expense.objects.filter(team=team)
             if date_from:
                 expenses = expenses.filter(expense_date__gte=date_from)
             if date_to:

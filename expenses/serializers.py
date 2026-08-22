@@ -1,5 +1,6 @@
 from django.db import IntegrityError
 from rest_framework import serializers
+from teams.services import get_active_team
 
 from .models import Expense
 
@@ -57,10 +58,11 @@ class CreateExpenseSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         user = self.context["request"].user
+        team = get_active_team(user)
         for _ in range(3):
-            expense_number = user.next_expense_number()
+            expense_number = team.next_expense_number()
             try:
-                return Expense.objects.create(user=user, expense_number=expense_number, **validated_data)
+                return Expense.objects.create(user=user, team=team, expense_number=expense_number, **validated_data)
             except IntegrityError:
                 continue
         raise serializers.ValidationError({"non_field_errors": ["Couldn't generate an expense number. Try again."]})

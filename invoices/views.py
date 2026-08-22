@@ -1,4 +1,4 @@
-from django.db.models import DecimalField, Sum, Value
+from django.db.models import DecimalField, F, Sum, Value
 from django.db.models.functions import Coalesce
 from django.http import Http404
 from django.shortcuts import render
@@ -7,6 +7,7 @@ from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from django.conf import settings
+from teams.services import get_active_team
 
 from .models import Invoice, InvoiceShare, Payment
 from .pagination import InvoicePagination
@@ -26,7 +27,8 @@ class InvoiceListCreateView(ListAPIView):
     pagination_class = InvoicePagination
 
     def get_queryset(self):
-        return Invoice.objects.filter(user=self.request.user)
+        team = get_active_team(self.request.user)
+        return Invoice.objects.filter(team=team)
 
     def post(self, request):
         if not request.user.is_email_verified:
@@ -41,21 +43,14 @@ class InvoiceListCreateView(ListAPIView):
 
 
 class OwedInvoicesView(ListAPIView):
-    """
-    Backs "Who owes me" — every sale for this user that isn't fully
-    paid, sorted either oldest-first (default) or by largest
-    outstanding balance. amount_paid/amount_due are computed
-    properties on Invoice (summed from Payment), so sorting by balance
-    needs a DB-level annotation rather than the Python property.
-    """
-
     serializer_class = InvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = InvoicePagination
 
     def get_queryset(self):
+        team = get_active_team(self.request.user)
         qs = (
-            Invoice.objects.filter(user=self.request.user)
+            Invoice.objects.filter(team=team)
             .exclude(status=Invoice.Status.PAID)
             .annotate(
                 paid_sum=Coalesce(
@@ -66,11 +61,6 @@ class OwedInvoicesView(ListAPIView):
             )
             .annotate(balance=Value(0, output_field=DecimalField(max_digits=12, decimal_places=2)))
         )
-        # Django can't subtract two annotated fields directly inside
-        # .annotate() in a single pass on all backends reliably, so the
-        # actual balance ordering is done with an F() expression here.
-        from django.db.models import F
-
         qs = qs.annotate(balance=F("total") - F("paid_sum"))
 
         sort = self.request.query_params.get("sort", "oldest")
@@ -83,8 +73,9 @@ class InvoiceDetailView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, invoice_id):
+        team = get_active_team(request.user)
         try:
-            invoice = Invoice.objects.get(id=invoice_id, user=request.user)
+            invoice = Invoice.objects.get(id=invoice_id, team=team)
         except Invoice.DoesNotExist:
             return Response({"message": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
         return Response(InvoiceDetailSerializer(invoice).data)
@@ -94,8 +85,9 @@ class RecordPaymentView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, invoice_id):
+        team = get_active_team(request.user)
         try:
-            invoice = Invoice.objects.get(id=invoice_id, user=request.user)
+            invoice = Invoice.objects.get(id=invoice_id, team=team)
         except Invoice.DoesNotExist:
             return Response({"message": "Invoice not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -111,10 +103,11 @@ class InvoiceSummaryView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        invoices = Invoice.objects.filter(user=request.user)
+        team = get_active_team(request.user)
+        invoices = Invoice.objects.filter(team=team)
         total_count = invoices.count()
         total_all = invoices.aggregate(s=Sum("total"))["s"] or 0
-        total_received = Payment.objects.filter(invoice__user=request.user).aggregate(s=Sum("amount"))["s"] or 0
+        total_received = Payment.objects.filter(invoice__team=team).aggregate(s=Sum("amount"))["s"] or 0
         total_outstanding = total_all - total_received
         return Response(
             {
@@ -144,18 +137,6 @@ class CreateInvoiceShareView(APIView):
         url = f"{settings.FRONTEND_SHARE_URL}/i/{share.id}/"
         return Response({"url": url}, status=status.HTTP_201_CREATED)
 
-# class CreateInvoiceShareView(APIView):
-#     permission_classes = [permissions.AllowAny]
-
-#     def post(self, request):
-#         serializer = CreateInvoiceShareSerializer(data=request.data, context={"request": request})
-#         serializer.is_valid(raise_exception=True)
-#         share = serializer.save()
-#         url = f"https://share.yousual.ng/i/{share.id}/"
-#         # url = request.build_absolute_uri(f"/i/{share.id}/")
-#         # url = f"{settings.FRONTEND_URL}/i/{share.id}/"
-#         url = f"https://share.yousual.ng/i/{share.id}/"
-#         return Response({"url": url}, status=status.HTTP_201_CREATED)
 
 
 def public_invoice_view(request, share_id):

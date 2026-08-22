@@ -31,6 +31,7 @@ class Invoice(models.Model):
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.DUE)
     note = models.CharField(max_length=280, blank=True, default="")
     brand_color = models.CharField(max_length=7, blank=True, default="")
+    team = models.ForeignKey("teams.Team", null=True, blank=True, on_delete=models.CASCADE, related_name="invoices")
     created_at_display = models.CharField(max_length=32)
     paid_date_display = models.CharField(max_length=32, blank=True, null=True)
     recorded_at = models.DateTimeField(auto_now_add=True)

@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     "customers",
     "invoices",
     "expenses",
+    "teams",
     "django.contrib.humanize",
 ]
 

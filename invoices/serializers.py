@@ -5,6 +5,7 @@ from django.db import IntegrityError
 from django.utils import timezone
 from rest_framework import serializers
 from customers.models import Customer
+from teams.services import get_active_team
 
 from .models import Invoice, InvoiceShare, Payment
 from .utils import extract_invoice_seq
@@ -55,16 +56,7 @@ class InvoiceDetailSerializer(InvoiceSerializer):
 
 
 class CreateInvoiceSerializer(serializers.Serializer):
-    """
-    Backs the dashboard's "Record a sale" flow. No status field —
-    status is always derived from the payment ledger (see
-    Invoice.recompute_status). Instead, this takes amount_paid_now:
-    how much the customer actually handed over at the point of sale,
-    which may be 0 (nothing yet), the full total (paid in full), or
-    anything in between (a deposit/instalment).
-    """
-
-    customer_name = serializers.CharField(max_length=255)
+    customer_name = serializers.CharField(max_length=255, required=False, allow_blank=True, default="")
     customer_phone = serializers.CharField(required=False, allow_blank=True, default="")
     items = serializers.ListField(child=serializers.DictField())
     amount_paid_now = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, default=Decimal("0"))
@@ -72,10 +64,7 @@ class CreateInvoiceSerializer(serializers.Serializer):
     brand_color = serializers.CharField(required=False, allow_blank=True, default="")
 
     def validate_customer_name(self, value):
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("Customer name is required.")
-        return value
+        return value.strip()
 
     def validate_customer_phone(self, value):
         if not value:
@@ -112,31 +101,38 @@ class CreateInvoiceSerializer(serializers.Serializer):
         total = _compute_total(attrs.get("items", []))
         amount_paid_now = attrs.get("amount_paid_now", Decimal("0"))
         if amount_paid_now > total:
-            raise serializers.ValidationError(
-                {"amount_paid_now": f"That's more than the sale total (₦{total})."}
-            )
+            raise serializers.ValidationError({"amount_paid_now": f"That's more than the sale total (₦{total})."})
+
+        fully_paid = amount_paid_now >= total
+        if not fully_paid and not attrs.get("customer_name", "").strip():
+            raise serializers.ValidationError({"customer_name": "Customer name is required unless the sale is paid in full."})
+
         return attrs
 
     def create(self, validated_data):
         user = self.context["request"].user
+        team = get_active_team(user)
         items = validated_data["items"]
         total = _compute_total(items)
         amount_paid_now = validated_data.get("amount_paid_now", Decimal("0"))
         now_display = timezone.now().strftime("%d %b %Y")
 
+        customer_name = validated_data["customer_name"].strip() or "Unknown"
+
         invoice = None
         for _ in range(3):
-            invoice_number = user.next_invoice_number()
+            invoice_number = team.next_invoice_number()
             try:
                 invoice = Invoice.objects.create(
                     user=user,
+                    team=team,
                     invoice_number=invoice_number,
-                    business_name=user.business_name,
-                    customer_name=validated_data["customer_name"],
+                    business_name=team.name,
+                    customer_name=customer_name,
                     customer_phone=validated_data.get("customer_phone", ""),
                     items=items,
                     total=total,
-                    status=Invoice.Status.DUE,  # corrected below via recompute_status
+                    status=Invoice.Status.DUE,
                     created_at_display=now_display,
                     note=validated_data.get("note", ""),
                     brand_color=validated_data.get("brand_color", ""),
@@ -147,12 +143,11 @@ class CreateInvoiceSerializer(serializers.Serializer):
         if invoice is None:
             raise serializers.ValidationError({"non_field_errors": ["Couldn't generate an invoice number. Try again."]})
 
-        customer = Customer.objects.upsert_from_sale(
-            user, validated_data["customer_name"], validated_data.get("customer_phone", "")
-        )
-        if customer:
-            invoice.customer = customer
-            invoice.save(update_fields=["customer"])
+        if customer_name != "Unknown":
+            customer = Customer.objects.upsert_from_sale(team, user, customer_name, validated_data.get("customer_phone", ""))
+            if customer:
+                invoice.customer = customer
+                invoice.save(update_fields=["customer"])
 
         if amount_paid_now > 0:
             Payment.objects.create(invoice=invoice, amount=amount_paid_now, paid_date_display=now_display)
@@ -191,30 +186,33 @@ class ImportGuestInvoicesSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         user = self.context["request"].user
+        team = get_active_team(user)
         created = []
         for raw in validated_data["invoices"]:
             invoice_number = raw.get("invoice_number")
             if not invoice_number:
                 continue
-            if Invoice.objects.filter(user=user, invoice_number=invoice_number).exists():
+            if Invoice.objects.filter(team=team, invoice_number=invoice_number).exists():
                 continue
             invoice = Invoice.objects.create(
                 user=user,
+                team=team,
                 invoice_number=invoice_number,
                 business_name=raw.get("business_name", ""),
                 customer_name=raw.get("customer_name", ""),
                 customer_phone=raw.get("customer_phone") or "",
                 items=raw.get("items", []),
                 total=raw.get("total", 0),
-                status=Invoice.Status.DUE,  # corrected below via recompute_status
+                status=Invoice.Status.DUE,
                 created_at_display=raw.get("created_at", ""),
                 note=raw.get("note") or "",
                 brand_color=raw.get("brand_color") or "",
             )
-            customer = Customer.objects.upsert_from_sale(user, invoice.customer_name, invoice.customer_phone)
-            if customer:
-                invoice.customer = customer
-                invoice.save(update_fields=["customer"])
+            if raw.get("customer_name", "").strip():
+                customer = Customer.objects.upsert_from_sale(team, user, raw.get("customer_name", ""), raw.get("customer_phone") or "")
+                if customer:
+                    invoice.customer = customer
+                    invoice.save(update_fields=["customer"])
             if raw.get("status") == "paid":
                 Payment.objects.create(
                     invoice=invoice,
@@ -226,9 +224,9 @@ class ImportGuestInvoicesSerializer(serializers.Serializer):
 
         if created:
             max_seq = max(extract_invoice_seq(inv.invoice_number) for inv in created)
-            if max_seq > user.invoice_counter:
-                user.invoice_counter = max_seq
-                user.save(update_fields=["invoice_counter"])
+            if max_seq > team.invoice_counter:
+                team.invoice_counter = max_seq
+                team.save(update_fields=["invoice_counter"])
 
         return created
 

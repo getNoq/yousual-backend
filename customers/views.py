@@ -7,22 +7,20 @@ from rest_framework.views import APIView
 from invoices.models import Invoice, Payment
 from invoices.pagination import InvoicePagination
 from invoices.serializers import InvoiceSerializer
+from teams.services import get_active_team
 
 from .models import Customer
 from .serializers import CustomerSerializer, UpdateCustomerSerializer
 
 
 class CustomerListView(ListAPIView):
-    """
-    Doubles as the autocomplete source when recording a sale — pass
-    ?search= to filter by name.
-    """
     serializer_class = CustomerSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = InvoicePagination
 
     def get_queryset(self):
-        qs = Customer.objects.filter(user=self.request.user)
+        team = get_active_team(self.request.user)
+        qs = Customer.objects.filter(team=team)
         search = self.request.query_params.get("search", "").strip()
         if search:
             qs = qs.filter(name__icontains=search)
@@ -33,8 +31,9 @@ class CustomerDetailView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, customer_id):
+        team = get_active_team(request.user)
         try:
-            customer = Customer.objects.get(id=customer_id, user=request.user)
+            customer = Customer.objects.get(id=customer_id, team=team)
         except Customer.DoesNotExist:
             return Response({"message": "Customer not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -53,8 +52,9 @@ class CustomerDetailView(APIView):
         )
 
     def patch(self, request, customer_id):
+        team = get_active_team(request.user)
         try:
-            customer = Customer.objects.get(id=customer_id, user=request.user)
+            customer = Customer.objects.get(id=customer_id, team=team)
         except Customer.DoesNotExist:
             return Response({"message": "Customer not found."}, status=status.HTTP_404_NOT_FOUND)
 

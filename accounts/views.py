@@ -9,6 +9,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from .emails import send_password_reset_email, send_verification_email
+from teams.models import Membership
+from teams.services import get_active_team
 
 from .serializers import (
     ChangePasswordSerializer,
@@ -59,7 +61,16 @@ class MeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        return Response(UserSerializer(request.user).data)
+        data = UserSerializer(request.user).data
+        team = get_active_team(request.user)
+        if team:
+            membership = Membership.objects.filter(team=team, user=request.user).first()
+            data["role"] = membership.role if membership else None
+            data["team_name"] = team.name
+        else:
+            data["role"] = None
+            data["team_name"] = None
+        return Response(data)
 
     def patch(self, request):
         serializer = UpdateProfileSerializer(request.user, data=request.data, partial=True)

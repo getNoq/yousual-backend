@@ -27,6 +27,7 @@ class Expense(models.Model):
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     category = models.CharField(max_length=20, choices=Category.choices, default=Category.OTHER)
     note = models.CharField(max_length=280, blank=True, default="")
+    team = models.ForeignKey("teams.Team", null=True, blank=True, on_delete=models.CASCADE, related_name="expenses")
     expense_date = models.DateField(default=timezone.localdate)
     receipt = models.FileField(upload_to=expense_receipt_path, null=True, blank=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
