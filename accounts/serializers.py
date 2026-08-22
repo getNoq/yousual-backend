@@ -3,6 +3,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_decode
 from rest_framework import serializers
+from teams.models import Team, Membership
 from .tokens import email_verification_token
 
 from .phone import normalize_ng_phone
@@ -42,7 +43,13 @@ class SignUpSerializer(serializers.Serializer):
         return value
 
     def create(self, validated_data):
-        return User.objects.create_user(**validated_data)
+        user = User.objects.create_user(**validated_data)
+        # THE FIX: every new signup gets their own personal team, as
+        # owner, with zero counters. Without this, get_active_team()
+        # returns None and the first sale/expense recorded crashes.
+        team = Team.objects.create(name=user.business_name, plan=Team.Plan.FREE)
+        Membership.objects.create(team=team, user=user, role=Membership.Role.OWNER)
+        return user
 
 
 class LoginSerializer(serializers.Serializer):
@@ -94,12 +101,6 @@ class ResetPasswordSerializer(serializers.Serializer):
 
 
 class UpdateProfileSerializer(serializers.ModelSerializer):
-    """
-    Deliberately excludes email — changing a login credential needs its
-    own careful, verified flow (confirming the new address, possibly
-    re-auth), not a plain profile field edit. Not built this pass.
-    """
-
     class Meta:
         model = User
         fields = ["business_name", "first_name", "last_name", "phone"]

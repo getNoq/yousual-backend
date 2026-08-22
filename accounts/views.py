@@ -1,7 +1,6 @@
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
-from django.core.mail import send_mail
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 from rest_framework import permissions, status
@@ -9,8 +8,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from .emails import send_password_reset_email, send_verification_email
+from teams.services import accept_invite_if_valid, get_active_team
 from teams.models import Membership
-from teams.services import get_active_team
 
 from .serializers import (
     ChangePasswordSerializer,
@@ -20,7 +19,7 @@ from .serializers import (
     SignUpSerializer,
     UpdateProfileSerializer,
     UserSerializer,
-    VerifyEmailSerializer
+    VerifyEmailSerializer,
 )
 
 User = get_user_model()
@@ -40,10 +39,13 @@ class SignUpView(APIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
         send_verification_email(user)
-        return Response(
-            {"user": UserSerializer(user).data, "tokens": tokens_for_user(user)},
-            status=status.HTTP_201_CREATED,
-        )
+
+        joined_team = accept_invite_if_valid(user, request.data.get("invite_token"))
+
+        response_data = {"user": UserSerializer(user).data, "tokens": tokens_for_user(user)}
+        if joined_team:
+            response_data["joined_team"] = joined_team
+        return Response(response_data, status=status.HTTP_201_CREATED)
 
 
 class LoginView(APIView):
@@ -54,7 +56,13 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         user = serializer.validated_data["user"]
-        return Response({"user": UserSerializer(user).data, "tokens": tokens_for_user(user)})
+
+        joined_team = accept_invite_if_valid(user, request.data.get("invite_token"))
+
+        response_data = {"user": UserSerializer(user).data, "tokens": tokens_for_user(user)}
+        if joined_team:
+            response_data["joined_team"] = joined_team
+        return Response(response_data)
 
 
 class MeView(APIView):
@@ -100,9 +108,6 @@ class ForgotPasswordView(APIView):
 
         user = User.objects.filter(email__iexact=email).first()
         if user is not None:
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-            raw_token = default_token_generator.make_token(user)
-            reset_link = f"{settings.FRONTEND_URL}/reset-password?token={uid}.{raw_token}"
             send_password_reset_email(user)
 
         return Response({"message": "If an account exists for that email, a reset link is on its way."})
@@ -118,6 +123,7 @@ class ResetPasswordView(APIView):
         user.set_password(serializer.validated_data["password"])
         user.save(update_fields=["password"])
         return Response({"message": "Your password has been updated."})
+
 
 class VerifyEmailView(APIView):
     permission_classes = [permissions.AllowAny]
