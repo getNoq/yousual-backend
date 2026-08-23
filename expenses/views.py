@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from common.date_ranges import resolve_date_range as _resolve_date_range
 
 from django.db.models import Q, Sum
 from django.utils import timezone
@@ -20,28 +20,6 @@ from .models import Expense
 from .serializers import CreateExpenseSerializer, ExpenseSerializer, ExpenseDetailSerializer, UpdateExpenseSerializer
 
 PAGE_SIZE = InvoicePagination.page_size
-
-
-def _resolve_date_range(request):
-    range_param = request.query_params.get("range", "all")
-    today = timezone.localdate()
-
-    if range_param == "today":
-        return today, today
-    if range_param == "week":
-        return today - timedelta(days=6), today
-    if range_param == "month":
-        return today.replace(day=1), today
-    if range_param == "custom":
-        raw_from = request.query_params.get("date_from")
-        raw_to = request.query_params.get("date_to")
-        try:
-            df = date.fromisoformat(raw_from) if raw_from else None
-            dt = date.fromisoformat(raw_to) if raw_to else None
-            return df, dt
-        except ValueError:
-            return None, None
-    return None, None
 
 
 class ExpenseListCreateView(ListAPIView):
