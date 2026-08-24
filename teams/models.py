@@ -15,6 +15,7 @@ class Team(models.Model):
     plan = models.CharField(max_length=20, choices=Plan.choices, default=Plan.FREE)
     invoice_counter = models.PositiveIntegerField(default=0)
     expense_counter = models.PositiveIntegerField(default=0)
+    hide_branding = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

@@ -82,10 +82,10 @@
       {% if share.status == "paid" %}
         <span class="badge paid">PAID</span>
       {% elif share.status == "partially_paid" %}
-        <span class="badge partially_paid">PARTIALLY PAID</span>
+        <span class="badge partially_paid">PART PAYMENT</span>
         <div class="payment-summary">₦{{ share.amount_paid|floatformat:0|intcomma }} paid · ₦{{ amount_due|floatformat:0|intcomma }} outstanding</div>
       {% else %}
-        <span class="badge due">OUTSTANDING</span>
+        <span class="badge due">UNPAID</span>
       {% endif %}
     </div>
 
@@ -94,7 +94,9 @@
     <div class="note" style="text-align: left; white-space: pre-wrap;">{{ share.note }}</div>
     {% endif %}
 
+    {% if not share.hide_branding %}
     <div class="footer">Powered by Yousual</div>
+    {% endif %}
   </div>
 </body>
 </html>

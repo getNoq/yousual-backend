@@ -16,6 +16,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     last_name = models.CharField(max_length=100, blank=True, default="")
     invoice_counter = models.PositiveIntegerField(default=0)
     expense_counter = models.PositiveIntegerField(default=0)
+    active_team = models.ForeignKey("teams.Team", null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
     is_email_verified = models.BooleanField(default=False)
 
     is_active = models.BooleanField(default=True)

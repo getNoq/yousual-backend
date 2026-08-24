@@ -8,6 +8,9 @@ from rest_framework import serializers
 from teams.services import get_active_team
 from activity.services import get_edit_history
 
+import secrets
+import string
+
 from .models import Invoice, InvoiceShare, Payment
 from .utils import extract_invoice_seq
 
@@ -72,10 +75,14 @@ class InvoiceDetailSerializer(InvoiceSerializer):
     payments = PaymentSerializer(many=True, read_only=True)
     edit_history = serializers.SerializerMethodField()
     last_edited_by_email = serializers.SerializerMethodField()
+    hide_branding = serializers.SerializerMethodField()
+
+    def get_hide_branding(self, obj):
+        return bool(obj.team and obj.team.plan == "business" and obj.team.hide_branding)
 
     class Meta(InvoiceSerializer.Meta):
         fields = InvoiceSerializer.Meta.fields + [
-            "payments", "edit_history", "last_edited_by_email", "last_edited_at",
+            "payments", "edit_history", "last_edited_by_email", "last_edited_at", "hide_branding",
         ]
 
     def get_edit_history(self, obj):
@@ -279,6 +286,12 @@ class ImportGuestInvoicesSerializer(serializers.Serializer):
 
         return created
 
+SLUG_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"  # excludes 0/o/1/i/l — avoids look-alike characters
+
+
+def _generate_share_slug(length=8):
+    return "".join(secrets.choice(SLUG_ALPHABET) for _ in range(length))
+
 
 class CreateInvoiceShareSerializer(serializers.Serializer):
     business_name = serializers.CharField(max_length=255)
@@ -292,6 +305,7 @@ class CreateInvoiceShareSerializer(serializers.Serializer):
     paid_date = serializers.CharField(source="paid_date_display", required=False, allow_null=True)
     note = serializers.CharField(required=False, allow_blank=True, max_length=280, default="")
     brand_color = serializers.CharField(required=False, allow_blank=True, default="")
+    hide_branding = serializers.BooleanField(required=False, default=False)
 
     def validate_brand_color(self, value):
         return validate_brand_color(value)
@@ -299,4 +313,20 @@ class CreateInvoiceShareSerializer(serializers.Serializer):
     def create(self, validated_data):
         request = self.context["request"]
         user = request.user if request.user.is_authenticated else None
-        return InvoiceShare.objects.create(user=user, **validated_data)
+        hide_branding = validated_data.pop("hide_branding", False)
+        if user:
+            from teams.services import get_active_team
+            team = get_active_team(user)
+            if not (team and team.plan == "business" and hide_branding):
+                hide_branding = False
+        else:
+            hide_branding = False
+
+        for _ in range(5):
+            slug = _generate_share_slug()
+            if not InvoiceShare.objects.filter(slug=slug).exists():
+                break
+        else:
+            raise serializers.ValidationError({"non_field_errors": ["Couldn't create a share link. Try again."]})
+
+        return InvoiceShare.objects.create(user=user, hide_branding=hide_branding, slug=slug, **validated_data)

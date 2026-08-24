@@ -3,13 +3,10 @@ from .models import Membership, TeamInvite
 
 
 def get_active_team(user):
-    """
-    A user's "current" team. Prefers a non-owner membership over their
-    own auto-created solo team, on the assumption that if you were
-    invited somewhere, that's why you're here right now. There's no
-    team-switcher UI yet — this is a deliberate placeholder heuristic
-    until multiple real memberships are common enough to need one.
-    """
+    if user.active_team_id:
+        if Membership.objects.filter(team_id=user.active_team_id, user=user).exists():
+            return user.active_team
+
     memberships = list(user.memberships.select_related("team").all())
     if not memberships:
         return None

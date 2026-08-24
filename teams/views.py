@@ -123,3 +123,53 @@ class AcceptTeamInviteView(APIView):
         invite.accepted_at = timezone.now()
         invite.save(update_fields=["accepted_at"])
         return Response({"message": f"You've joined {invite.team.name}."})
+
+
+class MyTeamsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        memberships = Membership.objects.filter(user=request.user).select_related("team").order_by("joined_at")
+        active_team = get_active_team(request.user)
+        return Response(
+            [
+                {
+                    "team_id": str(m.team.id),
+                    "team_name": m.team.name,
+                    "role": m.role,
+                    "is_active": bool(active_team and m.team_id == active_team.id),
+                }
+                for m in memberships
+            ]
+        )
+
+
+class SwitchTeamView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        team_id = request.data.get("team_id")
+        membership = Membership.objects.filter(team_id=team_id, user=request.user).first()
+        if not membership:
+            return Response({"message": "You're not a member of that team."}, status=status.HTTP_403_FORBIDDEN)
+        request.user.active_team_id = team_id
+        request.user.save(update_fields=["active_team_id"])
+        return Response({"message": f"Switched to {membership.team.name}."})
+
+class UpdateTeamBrandingView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request):
+        team = get_active_team(request.user)
+        membership = Membership.objects.filter(team=team, user=request.user).first()
+        if not membership or membership.role != Membership.Role.OWNER:
+            return Response({"message": "Only the team owner can change this."}, status=status.HTTP_403_FORBIDDEN)
+        if team.plan != "business":
+            return Response({"message": "This is a Business Plan feature."}, status=status.HTTP_403_FORBIDDEN)
+
+        hide_branding = request.data.get("hide_branding")
+        if hide_branding is None:
+            return Response({"message": "hide_branding is required."}, status=status.HTTP_400_BAD_REQUEST)
+        team.hide_branding = bool(hide_branding)
+        team.save(update_fields=["hide_branding"])
+        return Response({"hide_branding": team.hide_branding})

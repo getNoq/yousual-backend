@@ -29,6 +29,18 @@ def tokens_for_user(user):
     refresh = RefreshToken.for_user(user)
     return {"access": str(refresh.access_token), "refresh": str(refresh)}
 
+def serialize_user_with_role(user):
+    data = UserSerializer(user).data
+    team = get_active_team(user)
+    if team:
+        membership = Membership.objects.filter(team=team, user=user).first()
+        data["role"] = membership.role if membership else None
+        data["team_name"] = team.name
+    else:
+        data["role"] = None
+        data["team_name"] = None
+    return data
+
 
 class SignUpView(APIView):
     permission_classes = [permissions.AllowAny]
@@ -42,7 +54,7 @@ class SignUpView(APIView):
 
         joined_team = accept_invite_if_valid(user, request.data.get("invite_token"))
 
-        response_data = {"user": UserSerializer(user).data, "tokens": tokens_for_user(user)}
+        response_data = {"user": serialize_user_with_role(user), "tokens": tokens_for_user(user)}
         if joined_team:
             response_data["joined_team"] = joined_team
         return Response(response_data, status=status.HTTP_201_CREATED)
@@ -59,7 +71,7 @@ class LoginView(APIView):
 
         joined_team = accept_invite_if_valid(user, request.data.get("invite_token"))
 
-        response_data = {"user": UserSerializer(user).data, "tokens": tokens_for_user(user)}
+        response_data = {"user": serialize_user_with_role(user), "tokens": tokens_for_user(user)}
         if joined_team:
             response_data["joined_team"] = joined_team
         return Response(response_data)
@@ -69,16 +81,7 @@ class MeView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        data = UserSerializer(request.user).data
-        team = get_active_team(request.user)
-        if team:
-            membership = Membership.objects.filter(team=team, user=request.user).first()
-            data["role"] = membership.role if membership else None
-            data["team_name"] = team.name
-        else:
-            data["role"] = None
-            data["team_name"] = None
-        return Response(data)
+        return Response(serialize_user_with_role(request.user))
 
     def patch(self, request):
         serializer = UpdateProfileSerializer(request.user, data=request.data, partial=True)

@@ -1,3 +1,5 @@
+import uuid as uuid_lib
+
 from django.conf import settings
 from django.db.models import DecimalField, F, Sum, Value
 from django.db.models.functions import Coalesce
@@ -25,6 +27,17 @@ from .serializers import (
     UpdateInvoiceSerializer,
     _compute_total,
 )
+
+
+def _lookup_share(identifier):
+    share = InvoiceShare.objects.filter(slug=identifier).first()
+    if share:
+        return share
+    try:
+        uuid_lib.UUID(identifier)
+    except (ValueError, AttributeError, TypeError):
+        return None
+    return InvoiceShare.objects.filter(id=identifier).first()
 
 
 class InvoiceListCreateView(ListAPIView):
@@ -65,7 +78,6 @@ class OwedInvoicesView(ListAPIView):
                     output_field=DecimalField(max_digits=12, decimal_places=2),
                 )
             )
-            .annotate(balance=Value(0, output_field=DecimalField(max_digits=12, decimal_places=2)))
         )
         qs = qs.annotate(balance=F("total") - F("paid_sum"))
 
@@ -115,7 +127,7 @@ class InvoiceDetailView(APIView):
         invoice.last_edited_by = request.user
         invoice.last_edited_at = timezone.now()
         invoice.save()
-        invoice.recompute_status()  # total may have changed against existing payments
+        invoice.recompute_status()
 
         new_values = {
             "customer_name": invoice.customer_name,
@@ -146,6 +158,7 @@ class InvoiceDetailView(APIView):
         log_change(invoice, EditLog.Action.DELETED, request.user)
         return Response({"message": "Sale deleted."})
 
+
 class RecordPaymentView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -164,15 +177,12 @@ class RecordPaymentView(APIView):
         return Response(InvoiceDetailSerializer(invoice).data, status=status.HTTP_201_CREATED)
 
 
-
-
 class PaymentDetailView(APIView):
     """
     Payments are delete-only, not editable — retroactively changing a
     ledger entry's amount is a genuinely different, riskier operation
     than fixing a typo in a name. If a payment was recorded wrong, the
-    correct fix is: delete it, then record a new correct one (the
-    "Record payment" action already handles that second half).
+    correct fix is: delete it, then record a new correct one.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -224,6 +234,7 @@ class ImportGuestInvoicesView(APIView):
         created = serializer.save()
         return Response({"imported": InvoiceSerializer(created, many=True).data}, status=status.HTTP_201_CREATED)
 
+
 class CreateInvoiceShareView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -231,15 +242,13 @@ class CreateInvoiceShareView(APIView):
         serializer = CreateInvoiceShareSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         share = serializer.save()
-        url = f"{settings.FRONTEND_SHARE_URL}/i/{share.id}/"
+        url = f"{settings.FRONTEND_SHARE_URL}/i/{share.slug}/"
         return Response({"url": url}, status=status.HTTP_201_CREATED)
 
 
-
-def public_invoice_view(request, share_id):
-    try:
-        share = InvoiceShare.objects.get(id=share_id)
-    except InvoiceShare.DoesNotExist:
+def public_invoice_view(request, identifier):
+    share = _lookup_share(identifier)
+    if not share:
         raise Http404("This invoice link doesn't exist or has expired.")
 
     doc_label = "Receipt" if share.status == "paid" else "Invoice"
@@ -267,13 +276,13 @@ def public_invoice_view(request, share_id):
         },
     )
 
+
 class PublicShareDetailView(APIView):
     permission_classes = [permissions.AllowAny]
 
-    def get(self, request, share_id):
-        try:
-            share = InvoiceShare.objects.get(id=share_id)
-        except InvoiceShare.DoesNotExist:
+    def get(self, request, identifier):
+        share = _lookup_share(identifier)
+        if not share:
             return Response({"message": "This invoice link doesn't exist or has expired."}, status=status.HTTP_404_NOT_FOUND)
 
         return Response(
@@ -290,5 +299,6 @@ class PublicShareDetailView(APIView):
                 "paid_date": share.paid_date_display,
                 "note": share.note,
                 "brand_color": share.brand_color,
+                "hide_branding": share.hide_branding,
             }
         )

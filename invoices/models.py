@@ -127,6 +127,8 @@ class InvoiceShare(models.Model):
     amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0"))
     note = models.CharField(max_length=280, blank=True, default="")
     brand_color = models.CharField(max_length=7, blank=True, default="")
+    hide_branding = models.BooleanField(default=False)
+    slug = models.CharField(max_length=12, unique=True, db_index=True, blank=True)
     created_at_display = models.CharField(max_length=32)
     paid_date_display = models.CharField(max_length=32, blank=True, null=True)
     recorded_at = models.DateTimeField(auto_now_add=True)

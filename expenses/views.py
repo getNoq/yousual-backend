@@ -153,6 +153,7 @@ class OverviewFeedView(APIView):
         search = request.query_params.get("search", "").strip()
         sort = request.query_params.get("sort", "newest")
         date_from, date_to = _resolve_date_range(request)
+        status_param = request.query_params.get("status", "")
         try:
             page = max(1, int(request.query_params.get("page", 1)))
         except ValueError:
@@ -160,7 +161,7 @@ class OverviewFeedView(APIView):
 
         items = []
 
-        if type_param in ("all", "sale"):
+        if type_param in ("all", "sale") and status_param in ("", "paid", "partially_paid", "due"):
             invoices = Invoice.objects.filter(team=team)
             if date_from:
                 invoices = invoices.filter(recorded_at__date__gte=date_from)
@@ -168,6 +169,8 @@ class OverviewFeedView(APIView):
                 invoices = invoices.filter(recorded_at__date__lte=date_to)
             if search:
                 invoices = invoices.filter(customer_name__icontains=search)
+            if status_param:
+                invoices = invoices.filter(status=status_param)
             for inv in invoices:
                 items.append(
                     {
@@ -186,7 +189,7 @@ class OverviewFeedView(APIView):
                     }
                 )
 
-        if type_param in ("all", "expense"):
+        if type_param in ("all", "expense") and status_param in ("", "recorded"):
             expenses = Expense.objects.filter(team=team)
             if date_from:
                 expenses = expenses.filter(expense_date__gte=date_from)
