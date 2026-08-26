@@ -16,6 +16,7 @@ class Team(models.Model):
     invoice_counter = models.PositiveIntegerField(default=0)
     expense_counter = models.PositiveIntegerField(default=0)
     hide_branding = models.BooleanField(default=False)
+    is_comped = models.BooleanField(default=False, help_text="Manually granted Business Plan access by a super admin, bypassing payment.")
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

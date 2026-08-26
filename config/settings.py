@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "teams",
     "activity",
     "reports",
+    "billing",
     "django.contrib.humanize",
 ]
 
@@ -155,3 +156,14 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "")
+PAYSTACK_PUBLIC_KEY = os.environ.get("PAYSTACK_PUBLIC_KEY", "")
+PAYSTACK_PLAN_CODE_MONTHLY = os.environ.get("PAYSTACK_PLAN_CODE_MONTHLY", "")
+
+FLUTTERWAVE_SECRET_KEY = os.environ.get("FLUTTERWAVE_SECRET_KEY", "")
+FLUTTERWAVE_PUBLIC_KEY = os.environ.get("FLUTTERWAVE_PUBLIC_KEY", "")
+FLUTTERWAVE_WEBHOOK_SECRET_HASH = os.environ.get("FLUTTERWAVE_WEBHOOK_SECRET_HASH", "")
+FLUTTERWAVE_PLAN_ID = os.environ.get("FLUTTERWAVE_PLAN_ID", "")
+
+BUSINESS_PLAN_MONTHLY_PRICE = int(os.environ.get("BUSINESS_PLAN_MONTHLY_PRICE", "2500"))
