@@ -15,6 +15,7 @@ from activity.models import EditLog
 from invoices.models import Invoice, Payment
 from invoices.pagination import InvoicePagination
 from teams.services import get_active_team
+from common.plan_gating import business_plan_required_response
 
 from .models import Expense
 from .serializers import CreateExpenseSerializer, ExpenseSerializer, ExpenseDetailSerializer, UpdateExpenseSerializer
@@ -43,6 +44,10 @@ class ExpenseListCreateView(ListAPIView):
             )
         serializer = CreateExpenseSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        if serializer.validated_data.get("receipt"):
+            team = get_active_team(request.user)
+            if not team or team.plan != "business":
+                return business_plan_required_response("Receipt photo uploads")
         expense = serializer.save()
         return Response(
             ExpenseSerializer(expense, context={"request": request}).data,
@@ -76,6 +81,10 @@ class ExpenseDetailView(APIView):
 
         serializer = UpdateExpenseSerializer(expense, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        if serializer.validated_data.get("receipt"):
+            team = get_active_team(request.user)
+            if not team or team.plan != "business":
+                return business_plan_required_response("Receipt photo uploads")
         serializer.save()
 
         expense.last_edited_by = request.user

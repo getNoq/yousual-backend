@@ -36,9 +36,11 @@ def serialize_user_with_role(user):
         membership = Membership.objects.filter(team=team, user=user).first()
         data["role"] = membership.role if membership else None
         data["team_name"] = team.name
+        data["team_plan"] = team.plan
     else:
         data["role"] = None
         data["team_name"] = None
+        data["team_plan"] = "free"
     return data
 
 

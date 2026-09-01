@@ -4,6 +4,7 @@ from rest_framework.generics import ListAPIView
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from common.plan_gating import business_plan_required_response
 from invoices.models import Invoice, Payment
 from invoices.pagination import InvoicePagination
 from invoices.serializers import InvoiceSerializer
@@ -26,12 +27,20 @@ class CustomerListView(ListAPIView):
             qs = qs.filter(name__icontains=search)
         return qs
 
+    def list(self, request, *args, **kwargs):
+        team = get_active_team(request.user)
+        if not team or team.plan != "business":
+            return business_plan_required_response("Customer history")
+        return super().list(request, *args, **kwargs)
+
 
 class CustomerDetailView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request, customer_id):
         team = get_active_team(request.user)
+        if not team or team.plan != "business":
+            return business_plan_required_response("Customer history")
         try:
             customer = Customer.objects.get(id=customer_id, team=team)
         except Customer.DoesNotExist:
@@ -53,6 +62,8 @@ class CustomerDetailView(APIView):
 
     def patch(self, request, customer_id):
         team = get_active_team(request.user)
+        if not team or team.plan != "business":
+            return business_plan_required_response("Customer history")
         try:
             customer = Customer.objects.get(id=customer_id, team=team)
         except Customer.DoesNotExist:

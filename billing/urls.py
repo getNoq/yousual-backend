@@ -1,5 +1,5 @@
 from django.urls import path
-from .views import PlanPricesView
+from .views import PlanPricesView, RunGraceCheckView
 
 from .views import (
     BillingHistoryView,
@@ -20,4 +20,5 @@ urlpatterns = [
     path("webhook/paystack/", PaystackWebhookView.as_view(), name="billing-webhook-paystack"),
     path("webhook/flutterwave/", FlutterwaveWebhookView.as_view(), name="billing-webhook-flutterwave"),
     path("prices/", PlanPricesView.as_view(), name="billing-prices"),
+    path("cron/check-expired/", RunGraceCheckView.as_view(), name="billing-cron-check-expired"),
 ]

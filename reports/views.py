@@ -12,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from teams.models import Membership
 from teams.services import get_active_team
+from common.plan_gating import business_plan_required_response
 
 
 def _staff_forbidden(request, team):
@@ -26,6 +27,14 @@ def _staff_forbidden(request, team):
         return Response({"message": "Reports aren't available to staff accounts."}, status=status.HTTP_403_FORBIDDEN)
     return None
 
+
+def _access_forbidden(request, team):
+    staff_check = _staff_forbidden(request, team)
+    if staff_check:
+        return staff_check
+    if not team or team.plan != "business":
+        return business_plan_required_response("Reports")
+    return None
 
 def _bucket_key(d, granularity):
     if granularity == "day":
@@ -58,7 +67,7 @@ class ReportSummaryView(APIView):
 
     def get(self, request):
         team = get_active_team(request.user)
-        forbidden = _staff_forbidden(request, team)
+        forbidden = _access_forbidden(request, team)
         if forbidden:
             return forbidden
 
@@ -96,7 +105,7 @@ class ReportTrendView(APIView):
 
     def get(self, request):
         team = get_active_team(request.user)
-        forbidden = _staff_forbidden(request, team)
+        forbidden = _access_forbidden(request, team)
         if forbidden:
             return forbidden
 
@@ -130,7 +139,7 @@ class ReportExpenseBreakdownView(APIView):
 
     def get(self, request):
         team = get_active_team(request.user)
-        forbidden = _staff_forbidden(request, team)
+        forbidden = _access_forbidden(request, team)
         if forbidden:
             return forbidden
 
@@ -162,7 +171,7 @@ class ReportTopCustomersView(APIView):
 
     def get(self, request):
         team = get_active_team(request.user)
-        forbidden = _staff_forbidden(request, team)
+        forbidden = _access_forbidden(request, team)
         if forbidden:
             return forbidden
 
@@ -204,7 +213,7 @@ class ReportExportView(APIView):
 
     def get(self, request):
         team = get_active_team(request.user)
-        forbidden = _staff_forbidden(request, team)
+        forbidden = _access_forbidden(request, team)
         if forbidden:
             return forbidden
 

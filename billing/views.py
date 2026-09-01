@@ -11,7 +11,7 @@ from teams.services import get_active_team
 
 from .gateways import GATEWAYS, get_gateway
 from .models import BillingTransaction, PlanPrice, Subscription
-from .services import activate_subscription, deactivate_subscription, mark_past_due
+from .services import activate_subscription, deactivate_subscription, mark_past_due, downgrade_expired_grace_periods
 
 
 def _require_owner(request, team):
@@ -232,3 +232,20 @@ class FlutterwaveWebhookView(APIView):
                     activate_subscription(team, "flutterwave", reference, amount, interval=interval, customer_code=str(customer.get("id", "")))
 
         return Response(status=status.HTTP_200_OK)
+
+class RunGraceCheckView(APIView):
+    """
+    Does the same job as the check_expired_subscriptions management
+    command, but reachable over HTTP — since PythonAnywhere's free
+    tier has no scheduled-task feature, an external free scheduler
+    (GitHub Actions) pings this daily instead of cron running the
+    command directly on the server.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        secret = request.headers.get("X-Cron-Secret", "")
+        if not secret or secret != settings.CRON_SECRET_KEY:
+            return Response(status=status.HTTP_401_UNAUTHORIZED)
+        count = downgrade_expired_grace_periods()
+        return Response({"downgraded": count})
