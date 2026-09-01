@@ -1,4 +1,5 @@
 from django.urls import path
+from .views import PlanPricesView
 
 from .views import (
     BillingHistoryView,
@@ -18,4 +19,5 @@ urlpatterns = [
     path("history/", BillingHistoryView.as_view(), name="billing-history"),
     path("webhook/paystack/", PaystackWebhookView.as_view(), name="billing-webhook-paystack"),
     path("webhook/flutterwave/", FlutterwaveWebhookView.as_view(), name="billing-webhook-flutterwave"),
+    path("prices/", PlanPricesView.as_view(), name="billing-prices"),
 ]

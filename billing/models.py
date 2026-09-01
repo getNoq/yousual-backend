@@ -3,6 +3,24 @@ import uuid
 from django.conf import settings
 from django.db import models
 
+INTERVAL_CHOICES = [("monthly", "Monthly"), ("yearly", "Yearly")]
+
+
+class PlanPrice(models.Model):
+    """
+    Editable in Django admin — this IS the "super admin sets the
+    price" mechanism. One row per interval, no env var, no redeploy
+    needed to change what Business Plan costs.
+    """
+
+    interval = models.CharField(max_length=10, choices=INTERVAL_CHOICES, unique=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    paystack_plan_code = models.CharField(max_length=255, blank=True, default="")
+    flutterwave_plan_id = models.CharField(max_length=255, blank=True, default="")
+
+    def __str__(self):
+        return f"{self.get_interval_display()} — ₦{self.amount}"
+
 
 class Subscription(models.Model):
     class Status(models.TextChoices):
@@ -18,11 +36,13 @@ class Subscription(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     team = models.ForeignKey("teams.Team", on_delete=models.CASCADE, related_name="subscriptions")
     gateway = models.CharField(max_length=20, choices=Gateway.choices)
+    interval = models.CharField(max_length=10, choices=INTERVAL_CHOICES, default="monthly")
     gateway_customer_code = models.CharField(max_length=255, blank=True, default="")
     gateway_subscription_code = models.CharField(max_length=255, blank=True, default="")
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     current_period_end = models.DateTimeField(null=True, blank=True)
+    grace_period_ends_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -31,13 +51,6 @@ class Subscription(models.Model):
 
 
 class BillingTransaction(models.Model):
-    """
-    One row per processed charge event. gateway_reference is unique —
-    that uniqueness IS the idempotency guard: if the same webhook
-    fires twice, the second insert fails and we simply treat it as
-    already-handled rather than reprocessing.
-    """
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     team = models.ForeignKey("teams.Team", on_delete=models.CASCADE, related_name="billing_transactions")
     subscription = models.ForeignKey(Subscription, null=True, blank=True, on_delete=models.SET_NULL, related_name="transactions")

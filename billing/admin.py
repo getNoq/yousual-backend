@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import BillingTransaction, Subscription
+from .models import BillingTransaction, Subscription, PlanPrice
 
 
 @admin.register(Subscription)
@@ -13,3 +13,9 @@ class BillingTransactionAdmin(admin.ModelAdmin):
     list_display = ["team", "gateway", "gateway_reference", "amount", "status", "created_at"]
     list_filter = ["gateway", "status"]
     search_fields = ["gateway_reference"]
+
+@admin.register(PlanPrice)
+class PlanPriceAdmin(admin.ModelAdmin):
+    list_display = ["interval", "amount", "paystack_plan_code", "flutterwave_plan_id"]
+    list_display_links = ["interval"]
+    list_editable = ["amount"]

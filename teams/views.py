@@ -58,6 +58,14 @@ class InviteMemberView(APIView):
         if my_membership.role not in (Membership.Role.OWNER, Membership.Role.ADMIN):
             return Response({"message": "Only owners and admins can invite team members."}, status=status.HTTP_403_FORBIDDEN)
 
+        current_count = Membership.objects.filter(team=team).count() + TeamInvite.objects.filter(team=team, accepted_at__isnull=True).count()
+        limit = MAX_MEMBERS_BY_PLAN.get(team.plan, 1)
+        if current_count >= limit:
+            return Response(
+                {"message": f"You've reached the {limit}-member limit on your plan. Upgrade to Business Plan to add more.", "code": "plan_limit_reached"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         serializer = InviteMemberSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         email = serializer.validated_data["email"]
