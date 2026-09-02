@@ -1,0 +1,15 @@
+name: Daily billing grace period check
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # 6am UTC daily — adjust if you want a different time
+  workflow_dispatch: {}   # lets you trigger it manually from GitHub's UI too, for testing
+
+jobs:
+  check-expired-subscriptions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping billing cron endpoint
+        run: |
+          curl -sf -X POST "https://thetobiallen.pythonanywhere.com/api/billing/cron/check-expired/" \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET_KEY }}"
